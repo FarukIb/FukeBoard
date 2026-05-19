@@ -15,6 +15,7 @@ HEADERS += \
     appconstants.h \
     canvasitem.h \
     canvaswidget.h \
+    hitbox.h \
     mainwindow.h
 
 DISTFILES += \

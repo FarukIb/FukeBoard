@@ -4,6 +4,7 @@
 #include <QWidget>
 #include "appconstants.h"
 #include "canvasitem.h"
+#include "hitbox.h"
 
 class CanvasWidget : public QWidget
 {
@@ -30,6 +31,9 @@ protected:
 private:
     int m_penWidth = AppConstants::DefaultPenWidth;
     Mode m_mode = Mode::Pen;
+
+    std::set<Hitbox*> m_hitboxes,
+    std::optional<Hitbox*> m_activeHitbox;
 
     std::vector<std::unique_ptr<CanvasItem>> m_items;
 
@@ -63,6 +67,33 @@ private:
 
     void eraseAt(const QPointF &scenePos);
     void createTextEditorAt(const QPointF &scenePos);
+
+    // Paint helpers
+    void drawGrid(QPainter &painter, const QRectF &visibleScene);
+    void drawItems(QPainter &painter);
+    void drawCurrentStroke(QPainter &painter);
+    void drawSelectionRectangle(QPainter &painter);
+    void drawSelectionBorder(QPainter &painter);
+
+    // Mouse press handlers
+    void startPanning(const QPointF &screenPos);
+    void startPenStroke(const QPointF &scenePos);
+    void handleSelectPress(const QPointF &scenePos);
+
+    // Mouse move handlers
+    void continuePanning(const QPointF &screenPos);
+    void continuePenStroke(const QPointF &scenePos);
+    void continueErasing(const QPointF &scenePos);
+    void moveSelection(const QPointF &scenePos);
+    void updateSelectionRectangle(const QPointF &scenePos);
+
+    // Mouse release handlers
+    void finishPanning();
+    void finishPenStroke();
+    void finishSelection();
+
+    // Other input helpers
+    void handleZoom(const QPointF &screenPos, int wheelDelta);
 };
 
 #endif // CANVASWIDGET_H

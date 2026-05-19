@@ -126,24 +126,7 @@ CanvasItem *CanvasWidget::itemAt(const QPointF &scenePos) const {
     return nullptr;
 }
 
-void CanvasWidget::paintEvent(QPaintEvent *event) {
-    Q_UNUSED(event);
-
-    QPainter painter(this);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-
-    painter.fillRect(rect(), BackgroundColour);
-
-    painter.translate(m_offset);
-    painter.scale(m_zoom, m_zoom);
-
-    QRectF visibleScene(
-        screenToScene(QPointF(0, 0)),
-        screenToScene(QPointF(width(), height()))
-    );
-
-
-    // draw the grid
+void CanvasWidget::drawGrid(QPainter &painter, const QRectF &visibleScene) {
     QPen gridPen(GridColour);
     gridPen.setWidthF(0);
     painter.setPen(gridPen);
@@ -160,191 +143,104 @@ void CanvasWidget::paintEvent(QPaintEvent *event) {
     for (int y = top - top % GridSize; y < bottom; y += GridSize) {
         painter.drawLine(QPointF(left, y), QPointF(right, y));
     }
+}
 
-    // draw items
-    // maybe decide to not paint if not in frame, hopefully wont be an issue
+void CanvasWidget::drawItems(QPainter &painter) {
     for (const auto &item : m_items) {
         item->paint(painter);
     }
-
-    // draw the temporary line we are currently drawing
-    if (m_drawing) {
-        QPen pen(m_penColor, m_penWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
-        painter.setPen(pen);
-        painter.setBrush(Qt::NoBrush);
-        painter.drawPath(m_currentPath);
-    }
-
-    // draw live marquee selection rectangle
-    if (m_drawingSelectionRect) {
-        QPen selectionPen(SelectionLinesColour, SelectionLineWidth, SelectionLineType);
-        selectionPen.setCosmetic(true);
-
-        painter.setPen(selectionPen);
-        painter.setBrush(SelectionRectangleColour);
-        painter.drawRect(m_selectionRect.normalized());
-    }
-
-    // draw snapped border around selected items
-    if (!m_selectedItems.empty()) {
-        QPen selectionPen(SelectionLinesColour, SelectionLineWidth, SelectionLineType);
-        selectionPen.setCosmetic(true);
-
-        painter.setPen(selectionPen);
-        painter.setBrush(Qt::NoBrush);
-        painter.drawRect(selectedItemsBoundingRect());
-    }
 }
 
-void CanvasWidget::mousePressEvent(QMouseEvent *event) {
-    QPointF scenePos = screenToScene(event->position());
-    if (event->button() == Qt::MiddleButton) {
-        m_panning = true;
-        m_lastPanScreenPos = event->position();
-        setCursor(Qt::ClosedHandCursor);
+void CanvasWidget::drawCurrentStroke(QPainter &painter) {
+    if (!m_drawing) {
         return;
     }
 
-    if (event->button() == Qt::LeftButton && m_mode == Mode::Pen) {
-        m_selectedItems.clear();
-
-        m_drawing = true;
-        m_currentPath = QPainterPath();
-        m_currentPath.moveTo(scenePos);
-
-        update();
-        return;
-    }
-
-    if (event->button() == Qt::LeftButton && m_mode == Mode::Erase) {
-        eraseAt(scenePos);
-        return;
-    }
-
-    if (event->button() == Qt::LeftButton && m_mode == Mode::Select) {
-        QRectF currentSelectionBounds = selectedItemsBoundingRect();
-
-        if (!m_selectedItems.empty() && currentSelectionBounds.contains(scenePos)) {
-            // Move the existing group selection.
-            m_draggingSelection = true;
-            m_drawingSelectionRect = false;
-            m_lastDragScenePos = scenePos;
-        } else {
-            // Start drawing a new translucent selection rectangle.
-            m_selectedItems.clear();
-            m_draggingSelection = false;
-            m_drawingSelectionRect = true;
-            m_selectionStartScenePos = scenePos;
-            m_selectionRect = QRectF(scenePos, scenePos);
-        }
-
-        update();
-        return;
-    }
+    QPen pen(m_penColor, m_penWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
+    painter.setPen(pen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawPath(m_currentPath);
 }
 
-void CanvasWidget::mouseMoveEvent(QMouseEvent *event) {
-    QPointF scenePos = screenToScene(event->position());
-
-    if (m_panning) {
-        QPointF delta = event->position() - m_lastPanScreenPos;
-        m_offset += delta;
-        m_lastPanScreenPos = event->position();
-        update();
-    }
-
-    if (m_drawing && m_mode == Mode::Pen) {
-        m_currentPath.lineTo(scenePos);
-        update();
+void CanvasWidget::drawSelectionRectangle(QPainter &painter) {
+    if (!m_drawingSelectionRect) {
         return;
     }
 
-    if (m_mode == Mode::Erase && event->buttons() & Qt::LeftButton) {
-        eraseAt(scenePos);
-        return;
-    }
+    QPen selectionPen(SelectionLinesColour, SelectionLineWidth, SelectionLineType);
+    selectionPen.setCosmetic(true);
 
-    if (m_mode == Mode::Select && m_draggingSelection && !m_selectedItems.empty()) {
-        QPointF delta = scenePos - m_lastDragScenePos;
-
-        for (CanvasItem *item : m_selectedItems) {
-            item->moveBy(delta);
-        }
-
-        m_lastDragScenePos = scenePos;
-
-        update();
-        return;
-    }
-
-    if (m_mode == Mode::Select && m_drawingSelectionRect) {
-        m_selectionRect = QRectF(m_selectionStartScenePos, scenePos).normalized();
-        update();
-        return;
-    }
+    painter.setPen(selectionPen);
+    painter.setBrush(SelectionRectangleColour);
+    painter.drawRect(m_selectionRect.normalized());
 }
 
-void CanvasWidget::mouseReleaseEvent(QMouseEvent *event) {
-    if (event->button() == Qt::MiddleButton ||
-        (event->button() == Qt::LeftButton && m_panning)) {
-        m_panning = false;
-        unsetCursor();
+void CanvasWidget::drawSelectionBorder(QPainter &painter) {
+    if (m_selectedItems.empty()) {
         return;
     }
 
-    if (event->button() == Qt::LeftButton && m_drawing && m_mode == Mode::Pen) {
-        m_drawing = false;
+    QPen selectionPen(SelectionLinesColour, SelectionLineWidth, SelectionLineType);
+    selectionPen.setCosmetic(true);
 
-        auto stroke = std::make_unique<StrokeItem>(
-            m_currentPath,
-            m_penColor,
-            m_penWidth
+    painter.setPen(selectionPen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(selectedItemsBoundingRect());
+}
+
+void CanvasWidget::paintEvent(QPaintEvent *event) {
+    Q_UNUSED(event);
+
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    painter.fillRect(rect(), BackgroundColour);
+
+    painter.translate(m_offset);
+    painter.scale(m_zoom, m_zoom);
+
+    QRectF visibleScene(
+        screenToScene(QPointF(0, 0)),
+        screenToScene(QPointF(width(), height()))
         );
 
-        m_items.push_back(std::move(stroke));
+    drawGrid(painter, visibleScene);
+    drawItems(painter);
+    drawCurrentStroke(painter);
+    drawSelectionRectangle(painter);
+    drawSelectionBorder(painter);
+}
 
-        m_currentPath = QPainterPath();
-        update();
-        return;
-    }
+void CanvasWidget::startPanning(const QPointF &screenPos) {
+    m_panning = true;
+    m_lastPanScreenPos = screenPos;
+    setCursor(Qt::ClosedHandCursor);
+}
 
-    if (event->button() == Qt::LeftButton && m_mode == Mode::Select) {
-        if (m_drawingSelectionRect) {
-            selectItemsInsideRect(m_selectionRect);
-            m_drawingSelectionRect = false;
-            m_selectionRect = QRectF();
-        }
+void CanvasWidget::startPenStroke(const QPointF &scenePos) {
+    m_selectedItems.clear();
 
+    m_drawing = true;
+    m_currentPath = QPainterPath();
+    m_currentPath.moveTo(scenePos);
+
+    update();
+}
+
+void CanvasWidget::handleSelectPress(const QPointF &scenePos) {
+    QRectF currentSelectionBounds = selectedItemsBoundingRect();
+
+    if (!m_selectedItems.empty() && currentSelectionBounds.contains(scenePos)) {
+        m_draggingSelection = true;
+        m_drawingSelectionRect = false;
+        m_lastDragScenePos = scenePos;
+    } else {
+        m_selectedItems.clear();
         m_draggingSelection = false;
-        update();
-        return;
+        m_drawingSelectionRect = true;
+        m_selectionStartScenePos = scenePos;
+        m_selectionRect = QRectF(scenePos, scenePos);
     }
-}
-
-void CanvasWidget::mouseDoubleClickEvent(QMouseEvent *event)
-{
-    QPointF scenePos = screenToScene(event->position());
-
-    if (event->button() == Qt::LeftButton) {
-        createTextEditorAt(scenePos);
-    }
-}
-
-
-void CanvasWidget::wheelEvent(QWheelEvent *event)
-{
-    QPointF mouseSceneBeforeZoom = screenToScene(event->position());
-
-    if (event->angleDelta().y() > 0)
-        m_zoom *= ZoomFactor;
-    else
-        m_zoom /= ZoomFactor;
-
-    m_zoom = std::clamp(m_zoom, MinZoom, MaxZoom);
-
-    QPointF mouseSceneAfterZoom = screenToScene(event->position());
-
-    m_offset += (mouseSceneAfterZoom - mouseSceneBeforeZoom) * m_zoom;
 
     update();
 }
@@ -363,6 +259,185 @@ void CanvasWidget::eraseAt(const QPointF &scenePos) {
             return;
         }
     }
+}
+
+void CanvasWidget::mousePressEvent(QMouseEvent *event) {
+    const QPointF scenePos = screenToScene(event->position());
+
+    if (event->button() == Qt::MiddleButton) {
+        startPanning(event->position());
+        return;
+    }
+
+    if (event->button() != Qt::LeftButton) {
+        return;
+    }
+
+    switch (m_mode) {
+    case Mode::Pen:
+        startPenStroke(scenePos);
+        return;
+
+    case Mode::Erase:
+        eraseAt(scenePos);
+        return;
+
+    case Mode::Select:
+        handleSelectPress(scenePos);
+        return;
+    }
+}
+
+void CanvasWidget::continuePanning(const QPointF &screenPos) {
+    QPointF delta = screenPos - m_lastPanScreenPos;
+    m_offset += delta;
+    m_lastPanScreenPos = screenPos;
+    update();
+}
+
+void CanvasWidget::continuePenStroke(const QPointF &scenePos) {
+    m_currentPath.lineTo(scenePos);
+    update();
+}
+
+void CanvasWidget::continueErasing(const QPointF &scenePos) {
+    eraseAt(scenePos);
+}
+
+void CanvasWidget::moveSelection(const QPointF &scenePos) {
+    QPointF delta = scenePos - m_lastDragScenePos;
+
+    for (CanvasItem *item : m_selectedItems) {
+        item->moveBy(delta);
+    }
+
+    m_lastDragScenePos = scenePos;
+    update();
+}
+
+void CanvasWidget::updateSelectionRectangle(const QPointF &scenePos) {
+    m_selectionRect = QRectF(m_selectionStartScenePos, scenePos).normalized();
+    update();
+}
+
+void CanvasWidget::mouseMoveEvent(QMouseEvent *event) {
+    const QPointF scenePos = screenToScene(event->position());
+
+    if (m_panning) {
+        continuePanning(event->position());
+        return;
+    }
+
+    switch (m_mode) {
+    case Mode::Pen:
+        if (m_drawing) {
+            continuePenStroke(scenePos);
+        }
+        return;
+
+    case Mode::Erase:
+        if (event->buttons() & Qt::LeftButton) {
+            continueErasing(scenePos);
+        }
+        return;
+
+    case Mode::Select:
+        if (m_draggingSelection && !m_selectedItems.empty()) {
+            moveSelection(scenePos);
+        } else if (m_drawingSelectionRect) {
+            updateSelectionRectangle(scenePos);
+        }
+        return;
+    }
+}
+
+void CanvasWidget::finishPanning() {
+    m_panning = false;
+    unsetCursor();
+}
+
+void CanvasWidget::finishPenStroke() {
+    m_drawing = false;
+
+    auto stroke = std::make_unique<StrokeItem>(
+        m_currentPath,
+        m_penColor,
+        m_penWidth
+        );
+
+    m_items.push_back(std::move(stroke));
+
+    m_currentPath = QPainterPath();
+    update();
+}
+
+void CanvasWidget::finishSelection() {
+    if (m_drawingSelectionRect) {
+        selectItemsInsideRect(m_selectionRect);
+        m_drawingSelectionRect = false;
+        m_selectionRect = QRectF();
+    }
+
+    m_draggingSelection = false;
+    update();
+}
+
+void CanvasWidget::mouseReleaseEvent(QMouseEvent *event) {
+    if (event->button() == Qt::MiddleButton ||
+        (event->button() == Qt::LeftButton && m_panning)) {
+        finishPanning();
+        return;
+    }
+
+    if (event->button() != Qt::LeftButton) {
+        return;
+    }
+
+    switch (m_mode) {
+    case Mode::Pen:
+        if (m_drawing) {
+            finishPenStroke();
+        }
+        return;
+
+    case Mode::Erase:
+        return;
+
+    case Mode::Select:
+        finishSelection();
+        return;
+    }
+}
+void CanvasWidget::mouseDoubleClickEvent(QMouseEvent *event)
+{
+    QPointF scenePos = screenToScene(event->position());
+
+    if (event->button() == Qt::LeftButton) {
+        createTextEditorAt(scenePos);
+    }
+}
+
+void CanvasWidget::handleZoom(const QPointF &screenPos, int wheelDelta) {
+    QPointF mouseSceneBeforeZoom = screenToScene(screenPos);
+
+    if (wheelDelta > 0) {
+        m_zoom *= ZoomFactor;
+    } else {
+        m_zoom /= ZoomFactor;
+    }
+
+    m_zoom = std::clamp(m_zoom, MinZoom, MaxZoom);
+
+    QPointF mouseSceneAfterZoom = screenToScene(screenPos);
+
+    m_offset += (mouseSceneAfterZoom - mouseSceneBeforeZoom) * m_zoom;
+
+    update();
+}
+
+void CanvasWidget::wheelEvent(QWheelEvent *event)
+{
+    handleZoom(event->position(), event->angleDelta().y());
 }
 
 // this is temporary right now
