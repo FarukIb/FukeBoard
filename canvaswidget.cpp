@@ -15,6 +15,7 @@ constexpr int GridSize = 50;
 const QColor SelectionLinesColour = Qt::blue;
 const Qt::PenStyle SelectionLineType = Qt::DashLine;
 const int SelectionLineWidth = 1;
+const QColor SelectionRectangleColour = QColor(0, 120, 215, 40);
 
 const double ZoomFactor = 1.15;
 const double MinZoom = 0.2;
@@ -45,20 +46,48 @@ void CanvasWidget::setPenWidth(int width) {
     m_penWidth = width;
 }
 
+QRectF CanvasWidget::selectedItemsBoundingRect() const {
+    if (m_selectedItems.empty()) {
+        return QRectF();
+    }
+
+    QRectF result = (*m_selectedItems.begin())->boundingRect();
+
+    for (CanvasItem *item : m_selectedItems) {
+        result = result.united(item->boundingRect());
+    }
+
+    return result;
+}
+
+void CanvasWidget::selectItemsInsideRect(const QRectF &rect) {
+    m_selectedItems.clear();
+
+    QRectF normalizedRect = rect.normalized();
+
+    for (const auto &item : m_items) {
+        // right now using intersects() because it feels better for freehand strokes
+        if (normalizedRect.intersects(item->boundingRect())) {
+            m_selectedItems.insert(item.get());
+        }
+    }
+}
+
 void CanvasWidget::deleteSelection() {
     if (m_selectedItems.empty()) {
         return;
     }
 
-    for (int i = static_cast<int>(m_items.size()) - 1; i >= 0; i--) {
-        if (m_selectedItems.count(m_items[i].get())) {
-            m_items.erase(m_items.begin() + i);
-            m_selectedItems.erase(m_items[i].get());
-            update();
-            return;
+    for (auto it = m_items.begin(); it != m_items.end(); ) {
+        if (m_selectedItems.count(it->get())) {
+            it = m_items.erase(it);
+        } else {
+            ++it;
         }
     }
+
     m_selectedItems.clear();
+    update();
 }
 
 void CanvasWidget::duplicateSelection() {
@@ -146,26 +175,24 @@ void CanvasWidget::paintEvent(QPaintEvent *event) {
         painter.drawPath(m_currentPath);
     }
 
-    // draw seleciton border
-    if (m_selectedItems.size()) {
+    // draw live marquee selection rectangle
+    if (m_drawingSelectionRect) {
         QPen selectionPen(SelectionLinesColour, SelectionLineWidth, SelectionLineType);
         selectionPen.setCosmetic(true);
 
+        painter.setPen(selectionPen);
+        painter.setBrush(SelectionRectangleColour);
+        painter.drawRect(m_selectionRect.normalized());
+    }
 
-        /*
-         next task is
-            - for the selection mode add a rectangle to represent
-            the actual rectangle
-            - on release, put everything in the set then adjust borders
-        */
+    // draw snapped border around selected items
+    if (!m_selectedItems.empty()) {
+        QPen selectionPen(SelectionLinesColour, SelectionLineWidth, SelectionLineType);
+        selectionPen.setCosmetic(true);
+
         painter.setPen(selectionPen);
         painter.setBrush(Qt::NoBrush);
-        QRectF rect = (*m_selectedItems.begin())->boundingRect();
-        for (CanvasItem* item : m_selectedItems) {
-            QRectF currRect = item->boundingRect();
-
-        }
-        painter.drawRect(m_selectedItem->boundingRect());
+        painter.drawRect(selectedItemsBoundingRect());
     }
 }
 
@@ -179,7 +206,7 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event) {
     }
 
     if (event->button() == Qt::LeftButton && m_mode == Mode::Pen) {
-        m_selectedItem = nullptr;
+        m_selectedItems.clear();
 
         m_drawing = true;
         m_currentPath = QPainterPath();
@@ -195,13 +222,20 @@ void CanvasWidget::mousePressEvent(QMouseEvent *event) {
     }
 
     if (event->button() == Qt::LeftButton && m_mode == Mode::Select) {
-        m_selectedItem = itemAt(scenePos);
+        QRectF currentSelectionBounds = selectedItemsBoundingRect();
 
-        if (m_selectedItem) {
+        if (!m_selectedItems.empty() && currentSelectionBounds.contains(scenePos)) {
+            // Move the existing group selection.
             m_draggingSelection = true;
+            m_drawingSelectionRect = false;
             m_lastDragScenePos = scenePos;
         } else {
+            // Start drawing a new translucent selection rectangle.
+            m_selectedItems.clear();
             m_draggingSelection = false;
+            m_drawingSelectionRect = true;
+            m_selectionStartScenePos = scenePos;
+            m_selectionRect = QRectF(scenePos, scenePos);
         }
 
         update();
@@ -230,12 +264,21 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event) {
         return;
     }
 
-    if (m_mode == Mode::Select && m_draggingSelection && m_selectedItem) {
+    if (m_mode == Mode::Select && m_draggingSelection && !m_selectedItems.empty()) {
         QPointF delta = scenePos - m_lastDragScenePos;
 
-        m_selectedItem->moveBy(delta);
+        for (CanvasItem *item : m_selectedItems) {
+            item->moveBy(delta);
+        }
+
         m_lastDragScenePos = scenePos;
 
+        update();
+        return;
+    }
+
+    if (m_mode == Mode::Select && m_drawingSelectionRect) {
+        m_selectionRect = QRectF(m_selectionStartScenePos, scenePos).normalized();
         update();
         return;
     }
@@ -266,7 +309,14 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event) {
     }
 
     if (event->button() == Qt::LeftButton && m_mode == Mode::Select) {
+        if (m_drawingSelectionRect) {
+            selectItemsInsideRect(m_selectionRect);
+            m_drawingSelectionRect = false;
+            m_selectionRect = QRectF();
+        }
+
         m_draggingSelection = false;
+        update();
         return;
     }
 }

@@ -39,8 +39,16 @@ private:
     bool m_drawing = false;
 
     std::set<CanvasItem*> m_selectedItems;
+
     bool m_draggingSelection = false;
+    bool m_drawingSelectionRect = false;
+
     QPointF m_lastDragScenePos;
+    QPointF m_selectionStartScenePos;
+    QRectF m_selectionRect;
+
+    QRectF selectedItemsBoundingRect() const;
+    void selectItemsInsideRect(const QRectF &rect);
 
     bool m_panning = false;
     QPointF m_lastPanScreenPos;
