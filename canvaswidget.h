@@ -5,6 +5,7 @@
 #include "appconstants.h"
 #include "canvasitem.h"
 #include "hitbox.h"
+#include "selectioncontroller.h"
 
 class CanvasWidget : public QWidget
 {
@@ -32,24 +33,17 @@ private:
     int m_penWidth = AppConstants::DefaultPenWidth;
     Mode m_mode = Mode::Pen;
 
-    std::set<Hitbox*> m_hitboxes,
+    std::vector<HitboxOwner*> m_hitboxOwners;
     std::optional<Hitbox*> m_activeHitbox;
 
     std::vector<std::unique_ptr<CanvasItem>> m_items;
+
+    SelectionController m_selection;
 
     QColor m_penColor = AppConstants::DefaultPenColor;
 
     QPainterPath m_currentPath;
     bool m_drawing = false;
-
-    std::set<CanvasItem*> m_selectedItems;
-
-    bool m_draggingSelection = false;
-    bool m_drawingSelectionRect = false;
-
-    QPointF m_lastDragScenePos;
-    QPointF m_selectionStartScenePos;
-    QRectF m_selectionRect;
 
     QRectF selectedItemsBoundingRect() const;
     void selectItemsInsideRect(const QRectF &rect);
@@ -65,6 +59,14 @@ private:
 
     CanvasItem* itemAt(const QPointF &scenePos) const;
 
+    Hitbox *hitboxAt(const QPointF &scenePos) const;
+    void registerHitboxOwner(HitboxOwner *owner);
+    void clearActiveHitboxIfOwnedBy(HitboxOwner *owner);
+
+    void handleHitboxPress(Hitbox *hitbox, const QPointF &scenePos);
+    bool handleActiveHitboxDrag(const QPointF &scenePos);
+    bool handleActiveHitboxRelease(const QPointF &scenePos);
+
     void eraseAt(const QPointF &scenePos);
     void createTextEditorAt(const QPointF &scenePos);
 
@@ -72,8 +74,7 @@ private:
     void drawGrid(QPainter &painter, const QRectF &visibleScene);
     void drawItems(QPainter &painter);
     void drawCurrentStroke(QPainter &painter);
-    void drawSelectionRectangle(QPainter &painter);
-    void drawSelectionBorder(QPainter &painter);
+    void drawSelection(QPainter &painter);
 
     // Mouse press handlers
     void startPanning(const QPointF &screenPos);

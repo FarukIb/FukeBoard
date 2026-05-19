@@ -20,6 +20,8 @@ class HitboxOwner {
 public:
     virtual ~HitboxOwner() = default;
 
+    virtual std::vector<Hitbox*> hitboxes() = 0;
+
     virtual void onHitboxPressed(int role, const QPointF &scenePos) = 0;
     virtual void onHitboxDragged(int role, const QPointF &scenePos) = 0;
     virtual void onHitboxReleased(int role, const QPointF &scenePos) = 0;

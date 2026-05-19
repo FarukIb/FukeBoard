@@ -12,11 +12,6 @@ const QColor BackgroundColour = Qt::white;
 const QColor GridColour = QColor(230,230,230);
 constexpr int GridSize = 50;
 
-const QColor SelectionLinesColour = Qt::blue;
-const Qt::PenStyle SelectionLineType = Qt::DashLine;
-const int SelectionLineWidth = 1;
-const QColor SelectionRectangleColour = QColor(0, 120, 215, 40);
-
 const double ZoomFactor = 1.15;
 const double MinZoom = 0.2;
 const double MaxZoom = 5.0;
@@ -29,12 +24,14 @@ CanvasWidget::CanvasWidget(QWidget *parent)
     setMouseTracking(true);
     setFocusPolicy(Qt::StrongFocus);
     setStyleSheet("background-color: white;");
+
+    registerHitboxOwner(&m_selection);
 }
 
 void CanvasWidget::setMode(Mode mode) {
     m_mode = mode;
-    m_selectedItems = std::set<CanvasItem*>();
-    m_draggingSelection = false;
+    m_selection.clear();
+    m_activeHitbox.reset();
     update();
 }
 
@@ -46,68 +43,20 @@ void CanvasWidget::setPenWidth(int width) {
     m_penWidth = width;
 }
 
-QRectF CanvasWidget::selectedItemsBoundingRect() const {
-    if (m_selectedItems.empty()) {
-        return QRectF();
-    }
-
-    QRectF result = (*m_selectedItems.begin())->boundingRect();
-
-    for (CanvasItem *item : m_selectedItems) {
-        result = result.united(item->boundingRect());
-    }
-
-    return result;
-}
-
-void CanvasWidget::selectItemsInsideRect(const QRectF &rect) {
-    m_selectedItems.clear();
-
-    QRectF normalizedRect = rect.normalized();
-
-    for (const auto &item : m_items) {
-        // right now using intersects() because it feels better for freehand strokes
-        if (normalizedRect.intersects(item->boundingRect())) {
-            m_selectedItems.insert(item.get());
-        }
-    }
-}
-
 void CanvasWidget::deleteSelection() {
-    if (m_selectedItems.empty()) {
-        return;
-    }
-
-    for (auto it = m_items.begin(); it != m_items.end(); ) {
-        if (m_selectedItems.count(it->get())) {
-            it = m_items.erase(it);
-        } else {
-            ++it;
-        }
-    }
-
-    m_selectedItems.clear();
+    clearActiveHitboxIfOwnedBy(&m_selection);
+    m_selection.deleteSelectedItems(m_items);
     update();
 }
 
 void CanvasWidget::duplicateSelection() {
-    if (m_selectedItems.empty()) {
-        return;
-    }
+    m_selection.duplicateSelectedItems(
+        m_items,
+        QPointF(DeltaXAfterCopy, DeltaYAfterCopy)
+        );
 
-    std::set<CanvasItem*> copied;
-    for (auto item : m_selectedItems) {
-        auto newItem = item->clone();
-        newItem->moveBy(QPointF(DeltaXAfterCopy, DeltaYAfterCopy));
-
-        copied.insert(newItem.get());
-        m_items.push_back(std::move(newItem));
-    }
-
-    m_selectedItems = copied;
     update();
 }
-
 QPointF CanvasWidget::screenToScene(const QPointF &screenPoint) const {
     return (screenPoint - m_offset) / m_zoom;
 }
@@ -124,6 +73,97 @@ CanvasItem *CanvasWidget::itemAt(const QPointF &scenePos) const {
             return m_items[i].get();
 
     return nullptr;
+}
+
+void CanvasWidget::registerHitboxOwner(HitboxOwner *owner)
+{
+    if (!owner) {
+        return;
+    }
+
+    m_hitboxOwners.push_back(owner);
+}
+
+Hitbox *CanvasWidget::hitboxAt(const QPointF &scenePos) const
+{
+    for (auto ownerIt = m_hitboxOwners.rbegin(); ownerIt != m_hitboxOwners.rend(); ++ownerIt) {
+        HitboxOwner *owner = *ownerIt;
+
+        if (!owner) {
+            continue;
+        }
+
+        std::vector<Hitbox*> hitboxes = owner->hitboxes();
+
+        for (auto hitboxIt = hitboxes.rbegin(); hitboxIt != hitboxes.rend(); ++hitboxIt) {
+            Hitbox *hitbox = *hitboxIt;
+
+            if (hitbox && hitbox->owner && hitbox->contains(scenePos)) {
+                return hitbox;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+void CanvasWidget::clearActiveHitboxIfOwnedBy(HitboxOwner *owner)
+{
+    if (!m_activeHitbox.has_value()) {
+        return;
+    }
+
+    Hitbox *activeHitbox = *m_activeHitbox;
+
+    if (activeHitbox && activeHitbox->owner == owner) {
+        m_activeHitbox.reset();
+    }
+}
+
+void CanvasWidget::handleHitboxPress(Hitbox *hitbox, const QPointF &scenePos)
+{
+    if (!hitbox || !hitbox->owner) {
+        return;
+    }
+
+    m_activeHitbox = hitbox;
+    hitbox->owner->onHitboxPressed(hitbox->role, scenePos);
+    update();
+}
+
+bool CanvasWidget::handleActiveHitboxDrag(const QPointF &scenePos)
+{
+    if (!m_activeHitbox.has_value()) {
+        return false;
+    }
+
+    Hitbox *hitbox = *m_activeHitbox;
+
+    if (!hitbox || !hitbox->owner) {
+        m_activeHitbox.reset();
+        return false;
+    }
+
+    hitbox->owner->onHitboxDragged(hitbox->role, scenePos);
+    update();
+    return true;
+}
+
+bool CanvasWidget::handleActiveHitboxRelease(const QPointF &scenePos)
+{
+    if (!m_activeHitbox.has_value()) {
+        return false;
+    }
+
+    Hitbox *hitbox = *m_activeHitbox;
+
+    if (hitbox && hitbox->owner) {
+        hitbox->owner->onHitboxReleased(hitbox->role, scenePos);
+    }
+
+    m_activeHitbox.reset();
+    update();
+    return true;
 }
 
 void CanvasWidget::drawGrid(QPainter &painter, const QRectF &visibleScene) {
@@ -162,30 +202,9 @@ void CanvasWidget::drawCurrentStroke(QPainter &painter) {
     painter.drawPath(m_currentPath);
 }
 
-void CanvasWidget::drawSelectionRectangle(QPainter &painter) {
-    if (!m_drawingSelectionRect) {
-        return;
-    }
-
-    QPen selectionPen(SelectionLinesColour, SelectionLineWidth, SelectionLineType);
-    selectionPen.setCosmetic(true);
-
-    painter.setPen(selectionPen);
-    painter.setBrush(SelectionRectangleColour);
-    painter.drawRect(m_selectionRect.normalized());
-}
-
-void CanvasWidget::drawSelectionBorder(QPainter &painter) {
-    if (m_selectedItems.empty()) {
-        return;
-    }
-
-    QPen selectionPen(SelectionLinesColour, SelectionLineWidth, SelectionLineType);
-    selectionPen.setCosmetic(true);
-
-    painter.setPen(selectionPen);
-    painter.setBrush(Qt::NoBrush);
-    painter.drawRect(selectedItemsBoundingRect());
+void CanvasWidget::drawSelection(QPainter &painter)
+{
+    m_selection.paint(painter);
 }
 
 void CanvasWidget::paintEvent(QPaintEvent *event) {
@@ -207,8 +226,7 @@ void CanvasWidget::paintEvent(QPaintEvent *event) {
     drawGrid(painter, visibleScene);
     drawItems(painter);
     drawCurrentStroke(painter);
-    drawSelectionRectangle(painter);
-    drawSelectionBorder(painter);
+    drawSelection(painter);
 }
 
 void CanvasWidget::startPanning(const QPointF &screenPos) {
@@ -218,7 +236,8 @@ void CanvasWidget::startPanning(const QPointF &screenPos) {
 }
 
 void CanvasWidget::startPenStroke(const QPointF &scenePos) {
-    m_selectedItems.clear();
+    m_selection.clear();
+    m_activeHitbox.reset();
 
     m_drawing = true;
     m_currentPath = QPainterPath();
@@ -227,32 +246,26 @@ void CanvasWidget::startPenStroke(const QPointF &scenePos) {
     update();
 }
 
-void CanvasWidget::handleSelectPress(const QPointF &scenePos) {
-    QRectF currentSelectionBounds = selectedItemsBoundingRect();
-
-    if (!m_selectedItems.empty() && currentSelectionBounds.contains(scenePos)) {
-        m_draggingSelection = true;
-        m_drawingSelectionRect = false;
-        m_lastDragScenePos = scenePos;
-    } else {
-        m_selectedItems.clear();
-        m_draggingSelection = false;
-        m_drawingSelectionRect = true;
-        m_selectionStartScenePos = scenePos;
-        m_selectionRect = QRectF(scenePos, scenePos);
+void CanvasWidget::handleSelectPress(const QPointF &scenePos)
+{
+    if (Hitbox *hitbox = hitboxAt(scenePos)) {
+        handleHitboxPress(hitbox, scenePos);
+        return;
     }
 
+    m_selection.beginSelectionRectangle(scenePos);
     update();
 }
 
 void CanvasWidget::eraseAt(const QPointF &scenePos) {
-    if (m_items.empty())
+    if (m_items.empty()) {
         return;
-    for (int i = m_items.size() - 1; i >= 0; i--) {
+    }
+
+    for (int i = static_cast<int>(m_items.size()) - 1; i >= 0; --i) {
         if (m_items[i]->contains(scenePos)) {
-            if (m_selectedItems.count(m_items[i].get())) {
-                m_selectedItems.erase(m_items[i].get());
-            }
+            m_selection.clear();
+            m_activeHitbox.reset();
 
             m_items.erase(m_items.begin() + i);
             update();
@@ -304,27 +317,15 @@ void CanvasWidget::continueErasing(const QPointF &scenePos) {
     eraseAt(scenePos);
 }
 
-void CanvasWidget::moveSelection(const QPointF &scenePos) {
-    QPointF delta = scenePos - m_lastDragScenePos;
-
-    for (CanvasItem *item : m_selectedItems) {
-        item->moveBy(delta);
-    }
-
-    m_lastDragScenePos = scenePos;
-    update();
-}
-
-void CanvasWidget::updateSelectionRectangle(const QPointF &scenePos) {
-    m_selectionRect = QRectF(m_selectionStartScenePos, scenePos).normalized();
-    update();
-}
-
 void CanvasWidget::mouseMoveEvent(QMouseEvent *event) {
     const QPointF scenePos = screenToScene(event->position());
 
     if (m_panning) {
         continuePanning(event->position());
+        return;
+    }
+
+    if (handleActiveHitboxDrag(scenePos)) {
         return;
     }
 
@@ -342,10 +343,9 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event) {
         return;
 
     case Mode::Select:
-        if (m_draggingSelection && !m_selectedItems.empty()) {
-            moveSelection(scenePos);
-        } else if (m_drawingSelectionRect) {
-            updateSelectionRectangle(scenePos);
+        if (m_selection.isDrawingSelectionRectangle()) {
+            m_selection.updateSelectionRectangle(scenePos);
+            update();
         }
         return;
     }
@@ -372,13 +372,7 @@ void CanvasWidget::finishPenStroke() {
 }
 
 void CanvasWidget::finishSelection() {
-    if (m_drawingSelectionRect) {
-        selectItemsInsideRect(m_selectionRect);
-        m_drawingSelectionRect = false;
-        m_selectionRect = QRectF();
-    }
-
-    m_draggingSelection = false;
+    m_selection.finishSelectionRectangle(m_items);
     update();
 }
 
@@ -390,6 +384,12 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event) {
     }
 
     if (event->button() != Qt::LeftButton) {
+        return;
+    }
+
+    const QPointF scenePos = screenToScene(event->position());
+
+    if (handleActiveHitboxRelease(scenePos)) {
         return;
     }
 
