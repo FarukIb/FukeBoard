@@ -8,7 +8,7 @@ const Qt::PenStyle SelectionLineType = Qt::DashLine;
 const int SelectionLineWidth = 1;
 const QColor SelectionRectangleColour = QColor(0, 120, 215, 40);
 
-constexpr qreal HandleSize = 1000.0;
+constexpr qreal HandleSize = 10.0;
 constexpr qreal MinSelectionSize = 5.0;
 }
 
@@ -311,13 +311,24 @@ void SelectionController::paint(QPainter &painter) const
         painter.drawRect(m_selectionRect.normalized());
     }
 
-    if (!m_selectedItems.empty()) {
-        painter.setPen(selectionPen);
-        painter.setBrush(Qt::NoBrush);
-        painter.drawRect(boundingRect());
+    if (m_selectedItems.empty()) {
+        return;
+    }
+
+    painter.setPen(selectionPen);
+    painter.setBrush(Qt::NoBrush);
+    painter.drawRect(boundingRect());
+
+    QPen hitboxPen(Qt::red, 1, Qt::SolidLine);
+    hitboxPen.setCosmetic(true);
+
+    painter.setPen(hitboxPen);
+    painter.setBrush(QColor(255, 0, 0, 60));
+
+    for (int role = Role::TopLeft; role < Role::Count; ++role) {
+        painter.drawRect(m_hitboxes[role].rect);
     }
 }
-
 
 std::vector<Hitbox*> SelectionController::hitboxes()
 {
@@ -342,7 +353,7 @@ std::vector<Hitbox*> SelectionController::hitboxes()
 
 void SelectionController::onHitboxPressed(int role, const QPointF &scenePos)
 {
-    if (role != static_cast<int>(Role::Body)) {
+    if (!isValidRole(role)) {
         return;
     }
 
@@ -350,7 +361,6 @@ void SelectionController::onHitboxPressed(int role, const QPointF &scenePos)
 
     if (isResizeRole(role)) {
         std::cout << "hit the resize box" << std::endl;
-
         m_resizeStartBounds = boundingRect();
     }
 }
@@ -380,6 +390,7 @@ void SelectionController::onHitboxDragged(int role, const QPointF &scenePos)
     }
 
     if (isResizeRole(role)) {
+        std::cout << "handling dragging of resize box" << std::endl;
         resizeSelectedItems(role, scenePos);
         return;
     }
@@ -394,58 +405,48 @@ void SelectionController::onHitboxReleased(int role, const QPointF &scenePos)
     updateHitboxes();
 }
 
-
-QRectF SelectionController::resizedRectForRole(int role, const QPointF &scenePos) const
-{
-    if (!isValidRole(role)) {
-        return m_resizeStartBounds;
-    }
-
-    const RoleData &data = roleData()[role];
-
-    QRectF rect = m_resizeStartBounds;
-
-    if (data.changesLeft) {
-        rect.setLeft(scenePos.x());
-    }
-
-    if (data.changesTop) {
-        rect.setTop(scenePos.y());
-    }
-
-    if (data.changesRight) {
-        rect.setRight(scenePos.x());
-    }
-
-    if (data.changesBottom) {
-        rect.setBottom(scenePos.y());
-    }
-
-    rect = rect.normalized();
-
-    if (rect.width() < MinSelectionSize) {
-        rect.setWidth(MinSelectionSize);
-    }
-
-    if (rect.height() < MinSelectionSize) {
-        rect.setHeight(MinSelectionSize);
-    }
-
-    return rect;
-}
-
 void SelectionController::resizeSelectedItems(int role, const QPointF &scenePos)
 {
-    if (m_resizeStartBounds.isNull() ||
-        m_resizeStartBounds.width() == 0.0 ||
-        m_resizeStartBounds.height() == 0.0) {
+    QRectF oldBounds = boundingRect();
+
+    if (oldBounds.isNull() ||
+        oldBounds.width() == 0.0 ||
+        oldBounds.height() == 0.0) {
         return;
     }
 
-    QRectF newBounds = resizedRectForRole(role, scenePos);
+    QRectF newBounds = oldBounds;
+
+    const RoleData &data = roleData()[role];
+
+    if (data.changesLeft) {
+        newBounds.setLeft(scenePos.x());
+    }
+
+    if (data.changesTop) {
+        newBounds.setTop(scenePos.y());
+    }
+
+    if (data.changesRight) {
+        newBounds.setRight(scenePos.x());
+    }
+
+    if (data.changesBottom) {
+        newBounds.setBottom(scenePos.y());
+    }
+
+    newBounds = newBounds.normalized();
+
+    if (newBounds.width() < MinSelectionSize) {
+        newBounds.setWidth(MinSelectionSize);
+    }
+
+    if (newBounds.height() < MinSelectionSize) {
+        newBounds.setHeight(MinSelectionSize);
+    }
 
     for (CanvasItem *item : m_selectedItems) {
-        item->transformFromRect(m_resizeStartBounds, newBounds);
+        item->transformFromRect(oldBounds, newBounds);
     }
 
     updateHitboxes();

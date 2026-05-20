@@ -2,6 +2,7 @@
 
 #include <QMouseEvent>
 #include <QLineEdit>
+#include <iostream>
 
 namespace {
 constexpr int DeltaXAfterCopy = 30;
@@ -99,6 +100,8 @@ Hitbox *CanvasWidget::hitboxAt(const QPointF &scenePos) const
             Hitbox *hitbox = *hitboxIt;
 
             if (hitbox && hitbox->owner && hitbox->contains(scenePos)) {
+                if ((*hitboxIt)->role > 2)
+                    std::cout << "hit a non body box" << std::endl;
                 return hitbox;
             }
         }
