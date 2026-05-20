@@ -14,6 +14,7 @@ public:
     virtual QRectF boundingRect() const = 0;
     virtual bool contains(const QPointF &scenePos) const = 0;
     virtual void moveBy(const QPointF &delta) = 0;
+    virtual void transformFromRect(const QRectF &oldRect, const QRectF &newRect) = 0;
 
     virtual std::unique_ptr<CanvasItem> clone() const = 0;
 };
@@ -28,7 +29,8 @@ public:
     void paint(QPainter &painter) const override;
     QRectF boundingRect() const override;
     bool contains(const QPointF &scenePos) const override;
-    virtual void moveBy(const QPointF &delta) override;
+    void moveBy(const QPointF &delta) override;
+    void transformFromRect(const QRectF &oldRect, const QRectF &newRect) override;
 
     virtual std::unique_ptr<CanvasItem> clone() const override;
 private:
@@ -48,7 +50,12 @@ public:
     TextBoxItem() = default;
 
     TextBoxItem(const QPointF &position, const QString &text)
-        : m_position(position), m_text(text)
+        : m_rect(position, QSizeF(260, 60)), m_text(text)
+    {
+    }
+
+    TextBoxItem(const QRectF &rect, const QString &text)
+        : m_rect(rect), m_text(text)
     {
     }
 
@@ -66,7 +73,7 @@ public:
 
     QRectF boundingRect() const override
     {
-        return QRectF(m_position, QSizeF(260, 60));
+        return m_rect;
     }
 
     bool contains(const QPointF &scenePos) const override
@@ -76,16 +83,38 @@ public:
 
     void moveBy(const QPointF &delta) override
     {
-        m_position += delta;
+        m_rect.translate(delta);
+    }
+
+    void transformFromRect(const QRectF &oldRect, const QRectF &newRect) override
+    {
+        if (oldRect.width() == 0.0 || oldRect.height() == 0.0) {
+            return;
+        }
+
+        qreal leftRatio = (m_rect.left() - oldRect.left()) / oldRect.width();
+        qreal topRatio = (m_rect.top() - oldRect.top()) / oldRect.height();
+        qreal rightRatio = (m_rect.right() - oldRect.left()) / oldRect.width();
+        qreal bottomRatio = (m_rect.bottom() - oldRect.top()) / oldRect.height();
+
+        qreal newLeft = newRect.left() + leftRatio * newRect.width();
+        qreal newTop = newRect.top() + topRatio * newRect.height();
+        qreal newRight = newRect.left() + rightRatio * newRect.width();
+        qreal newBottom = newRect.top() + bottomRatio * newRect.height();
+
+        m_rect = QRectF(
+                     QPointF(newLeft, newTop),
+                     QPointF(newRight, newBottom)
+                     ).normalized();
     }
 
     std::unique_ptr<CanvasItem> clone() const override
     {
-        return std::make_unique<TextBoxItem>(m_position, m_text);
+        return std::make_unique<TextBoxItem>(m_rect, m_text);
     }
 
 private:
-    QPointF m_position;
+    QRectF m_rect;
     QString m_text;
 };
 

@@ -1,17 +1,146 @@
 #include "selectioncontroller.h"
 
+#include <iostream>
+
 namespace {
 const QColor SelectionLinesColour = Qt::blue;
 const Qt::PenStyle SelectionLineType = Qt::DashLine;
 const int SelectionLineWidth = 1;
 const QColor SelectionRectangleColour = QColor(0, 120, 215, 40);
+
+constexpr qreal HandleSize = 1000.0;
+constexpr qreal MinSelectionSize = 5.0;
 }
 
 SelectionController::SelectionController()
 {
-    m_bodyHitbox.owner = this;
-    m_bodyHitbox.role = static_cast<int>(Role::Body);
-    m_bodyHitbox.rect = QRectF();
+    initializeHitboxes();
+}
+
+const std::array<SelectionController::RoleData, SelectionController::Role::Count>&
+SelectionController::roleData()
+{
+    static const std::array<RoleData, Role::Count> data = {{
+        // Body
+        RoleData {
+            .resize = false,
+            .xFactor = 0.5,
+            .yFactor = 0.5,
+            .changesLeft = false,
+            .changesTop = false,
+            .changesRight = false,
+            .changesBottom = false
+        },
+
+        // TopLeft
+        RoleData {
+            .resize = true,
+            .xFactor = 0.0,
+            .yFactor = 0.0,
+            .changesLeft = true,
+            .changesTop = true,
+            .changesRight = false,
+            .changesBottom = false
+        },
+
+        // Top
+        RoleData {
+            .resize = true,
+            .xFactor = 0.5,
+            .yFactor = 0.0,
+            .changesLeft = false,
+            .changesTop = true,
+            .changesRight = false,
+            .changesBottom = false
+        },
+
+        // TopRight
+        RoleData {
+            .resize = true,
+            .xFactor = 1.0,
+            .yFactor = 0.0,
+            .changesLeft = false,
+            .changesTop = true,
+            .changesRight = true,
+            .changesBottom = false
+        },
+
+        // Right
+        RoleData {
+            .resize = true,
+            .xFactor = 1.0,
+            .yFactor = 0.5,
+            .changesLeft = false,
+            .changesTop = false,
+            .changesRight = true,
+            .changesBottom = false
+        },
+
+        // BottomRight
+        RoleData {
+            .resize = true,
+            .xFactor = 1.0,
+            .yFactor = 1.0,
+            .changesLeft = false,
+            .changesTop = false,
+            .changesRight = true,
+            .changesBottom = true
+        },
+
+        // Bottom
+        RoleData {
+            .resize = true,
+            .xFactor = 0.5,
+            .yFactor = 1.0,
+            .changesLeft = false,
+            .changesTop = false,
+            .changesRight = false,
+            .changesBottom = true
+        },
+
+        // BottomLeft
+        RoleData {
+            .resize = true,
+            .xFactor = 0.0,
+            .yFactor = 1.0,
+            .changesLeft = true,
+            .changesTop = false,
+            .changesRight = false,
+            .changesBottom = true
+        },
+
+        // Left
+        RoleData {
+            .resize = true,
+            .xFactor = 0.0,
+            .yFactor = 0.5,
+            .changesLeft = true,
+            .changesTop = false,
+            .changesRight = false,
+            .changesBottom = false
+        }
+    }};
+
+    return data;
+}
+
+bool SelectionController::isValidRole(int role) const
+{
+    return role >= 0 && role < Role::Count;
+}
+
+bool SelectionController::isResizeRole(int role) const
+{
+    return isValidRole(role) && roleData()[role].resize;
+}
+
+void SelectionController::initializeHitboxes()
+{
+    for (int role = 0; role < Role::Count; ++role) {
+        m_hitboxes[role].owner = this;
+        m_hitboxes[role].role = role;
+        m_hitboxes[role].rect = QRectF();
+    }
 }
 
 void SelectionController::clear()
@@ -150,6 +279,26 @@ QRectF SelectionController::boundingRect() const
     return result;
 }
 
+QPointF SelectionController::handleCenterForRole(Role role, const QRectF &bounds) const
+{
+    const RoleData &data = roleData()[role];
+
+    return QPointF(
+        bounds.left() + data.xFactor * bounds.width(),
+        bounds.top() + data.yFactor * bounds.height()
+        );
+}
+
+QRectF SelectionController::handleRectAt(const QPointF &center) const
+{
+    return QRectF(
+        center.x() - HandleSize / 2.0,
+        center.y() - HandleSize / 2.0,
+        HandleSize,
+        HandleSize
+        );
+}
+
 
 void SelectionController::paint(QPainter &painter) const
 {
@@ -178,9 +327,17 @@ std::vector<Hitbox*> SelectionController::hitboxes()
 
     updateHitboxes();
 
-    return {
-        &m_bodyHitbox
-    };
+    std::vector<Hitbox*> result;
+    result.reserve(Role::Count);
+
+    // Body first, handles after body.
+    // CanvasWidget reverse-iterates hitboxes, so handles get priority over body.
+    for (Hitbox &hitbox : m_hitboxes) {
+        result.push_back(&hitbox);
+    }
+    std::cout << m_hitboxes.size() << std::endl;
+
+    return result;
 }
 
 void SelectionController::onHitboxPressed(int role, const QPointF &scenePos)
@@ -190,14 +347,16 @@ void SelectionController::onHitboxPressed(int role, const QPointF &scenePos)
     }
 
     m_lastDragScenePos = scenePos;
+
+    if (isResizeRole(role)) {
+        std::cout << "hit the resize box" << std::endl;
+
+        m_resizeStartBounds = boundingRect();
+    }
 }
 
-void SelectionController::onHitboxDragged(int role, const QPointF &scenePos)
+void SelectionController::moveSelectedItems(const QPointF &scenePos)
 {
-    if (role != static_cast<int>(Role::Body)) {
-        return;
-    }
-
     QPointF delta = scenePos - m_lastDragScenePos;
 
     for (CanvasItem *item : m_selectedItems) {
@@ -208,20 +367,107 @@ void SelectionController::onHitboxDragged(int role, const QPointF &scenePos)
     updateHitboxes();
 }
 
+
+void SelectionController::onHitboxDragged(int role, const QPointF &scenePos)
+{
+    if (!isValidRole(role)) {
+        return;
+    }
+
+    if (role == Role::Body) {
+        moveSelectedItems(scenePos);
+        return;
+    }
+
+    if (isResizeRole(role)) {
+        resizeSelectedItems(role, scenePos);
+        return;
+    }
+}
+
 void SelectionController::onHitboxReleased(int role, const QPointF &scenePos)
 {
     Q_UNUSED(role);
     Q_UNUSED(scenePos);
 
+    m_resizeStartBounds = QRectF();
     updateHitboxes();
 }
 
-void SelectionController::updateHitboxes()
+
+QRectF SelectionController::resizedRectForRole(int role, const QPointF &scenePos) const
 {
-    if (m_selectedItems.empty()) {
-        m_bodyHitbox.rect = QRectF();
+    if (!isValidRole(role)) {
+        return m_resizeStartBounds;
+    }
+
+    const RoleData &data = roleData()[role];
+
+    QRectF rect = m_resizeStartBounds;
+
+    if (data.changesLeft) {
+        rect.setLeft(scenePos.x());
+    }
+
+    if (data.changesTop) {
+        rect.setTop(scenePos.y());
+    }
+
+    if (data.changesRight) {
+        rect.setRight(scenePos.x());
+    }
+
+    if (data.changesBottom) {
+        rect.setBottom(scenePos.y());
+    }
+
+    rect = rect.normalized();
+
+    if (rect.width() < MinSelectionSize) {
+        rect.setWidth(MinSelectionSize);
+    }
+
+    if (rect.height() < MinSelectionSize) {
+        rect.setHeight(MinSelectionSize);
+    }
+
+    return rect;
+}
+
+void SelectionController::resizeSelectedItems(int role, const QPointF &scenePos)
+{
+    if (m_resizeStartBounds.isNull() ||
+        m_resizeStartBounds.width() == 0.0 ||
+        m_resizeStartBounds.height() == 0.0) {
         return;
     }
 
-    m_bodyHitbox.rect = boundingRect();
+    QRectF newBounds = resizedRectForRole(role, scenePos);
+
+    for (CanvasItem *item : m_selectedItems) {
+        item->transformFromRect(m_resizeStartBounds, newBounds);
+    }
+
+    updateHitboxes();
+}
+
+
+void SelectionController::updateHitboxes()
+{
+    for (Hitbox &hitbox : m_hitboxes) {
+        hitbox.rect = QRectF();
+    }
+
+    if (m_selectedItems.empty()) {
+        return;
+    }
+
+    QRectF bounds = boundingRect();
+
+    m_hitboxes[Role::Body].rect = bounds;
+
+    for (int role = Role::TopLeft; role < Role::Count; ++role) {
+        QPointF center = handleCenterForRole(static_cast<Role>(role), bounds);
+        m_hitboxes[role].rect = handleRectAt(center);
+    }
 }
