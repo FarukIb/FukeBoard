@@ -1,18 +1,26 @@
 #ifndef HITBOX_H
 #define HITBOX_H
 
+#include <QCursor>
 #include <QPointF>
 #include <QRectF>
+
+#include <vector>
 
 class HitboxOwner;
 
 struct Hitbox {
     QRectF rect;
-    int role;
+    int role = 0;
     HitboxOwner *owner = nullptr;
+    Qt::CursorShape cursorShape = Qt::ArrowCursor;
 
     bool contains(const QPointF &scenePos) const {
         return rect.contains(scenePos);
+    }
+
+    QCursor cursor() const {
+        return QCursor(cursorShape);
     }
 };
 

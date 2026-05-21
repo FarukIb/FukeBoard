@@ -34,7 +34,15 @@ private:
     Mode m_mode = Mode::Pen;
 
     std::vector<HitboxOwner*> m_hitboxOwners;
-    std::optional<Hitbox*> m_activeHitbox;
+    struct ActiveHitbox {
+        HitboxOwner *owner = nullptr;
+        int role = 0;
+        Qt::CursorShape cursorShape = Qt::ArrowCursor;
+    };
+
+    void clearActiveHitboxIfOwnedByItem(CanvasItem *item);
+
+    std::optional<ActiveHitbox> m_activeHitbox;
 
     std::vector<std::unique_ptr<CanvasItem>> m_items;
 
@@ -59,6 +67,7 @@ private:
 
     CanvasItem* itemAt(const QPointF &scenePos) const;
 
+    Hitbox *hitboxAtForOwner(HitboxOwner *owner, const QPointF &scenePos) const;
     Hitbox *hitboxAt(const QPointF &scenePos) const;
     void registerHitboxOwner(HitboxOwner *owner);
     void clearActiveHitboxIfOwnedBy(HitboxOwner *owner);
@@ -66,6 +75,8 @@ private:
     void handleHitboxPress(Hitbox *hitbox, const QPointF &scenePos);
     bool handleActiveHitboxDrag(const QPointF &scenePos);
     bool handleActiveHitboxRelease(const QPointF &scenePos);
+    void updateCursorForPosition(const QPointF &scenePos);
+    void resetCanvasCursor();
 
     void eraseAt(const QPointF &scenePos);
     void createTextEditorAt(const QPointF &scenePos);

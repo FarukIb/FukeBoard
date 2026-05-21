@@ -1,7 +1,5 @@
 #include "selectioncontroller.h"
 
-#include <iostream>
-
 namespace {
 const QColor SelectionLinesColour = Qt::blue;
 const Qt::PenStyle SelectionLineType = Qt::DashLine;
@@ -30,7 +28,8 @@ SelectionController::roleData()
             .changesLeft = false,
             .changesTop = false,
             .changesRight = false,
-            .changesBottom = false
+            .changesBottom = false,
+            .cursorShape = Qt::SizeAllCursor
         },
 
         // TopLeft
@@ -41,7 +40,8 @@ SelectionController::roleData()
             .changesLeft = true,
             .changesTop = true,
             .changesRight = false,
-            .changesBottom = false
+            .changesBottom = false,
+            .cursorShape = Qt::SizeFDiagCursor
         },
 
         // Top
@@ -52,7 +52,8 @@ SelectionController::roleData()
             .changesLeft = false,
             .changesTop = true,
             .changesRight = false,
-            .changesBottom = false
+            .changesBottom = false,
+            .cursorShape = Qt::SizeVerCursor
         },
 
         // TopRight
@@ -63,7 +64,8 @@ SelectionController::roleData()
             .changesLeft = false,
             .changesTop = true,
             .changesRight = true,
-            .changesBottom = false
+            .changesBottom = false,
+            .cursorShape = Qt::SizeBDiagCursor
         },
 
         // Right
@@ -74,7 +76,8 @@ SelectionController::roleData()
             .changesLeft = false,
             .changesTop = false,
             .changesRight = true,
-            .changesBottom = false
+            .changesBottom = false,
+            .cursorShape = Qt::SizeHorCursor
         },
 
         // BottomRight
@@ -85,7 +88,8 @@ SelectionController::roleData()
             .changesLeft = false,
             .changesTop = false,
             .changesRight = true,
-            .changesBottom = true
+            .changesBottom = true,
+            .cursorShape = Qt::SizeFDiagCursor
         },
 
         // Bottom
@@ -96,7 +100,8 @@ SelectionController::roleData()
             .changesLeft = false,
             .changesTop = false,
             .changesRight = false,
-            .changesBottom = true
+            .changesBottom = true,
+            .cursorShape = Qt::SizeVerCursor
         },
 
         // BottomLeft
@@ -107,7 +112,8 @@ SelectionController::roleData()
             .changesLeft = true,
             .changesTop = false,
             .changesRight = false,
-            .changesBottom = true
+            .changesBottom = true,
+            .cursorShape = Qt::SizeBDiagCursor
         },
 
         // Left
@@ -118,7 +124,8 @@ SelectionController::roleData()
             .changesLeft = true,
             .changesTop = false,
             .changesRight = false,
-            .changesBottom = false
+            .changesBottom = false,
+            .cursorShape = Qt::SizeHorCursor
         }
     }};
 
@@ -141,6 +148,7 @@ void SelectionController::initializeHitboxes()
         m_hitboxes[role].owner = this;
         m_hitboxes[role].role = role;
         m_hitboxes[role].rect = QRectF();
+        m_hitboxes[role].cursorShape = roleData()[role].cursorShape;
     }
 }
 
@@ -358,7 +366,6 @@ std::vector<Hitbox*> SelectionController::hitboxes()
     for (Hitbox &hitbox : m_hitboxes) {
         result.push_back(&hitbox);
     }
-    std::cout << m_hitboxes.size() << std::endl;
 
     return result;
 }
@@ -372,7 +379,6 @@ void SelectionController::onHitboxPressed(int role, const QPointF &scenePos)
     m_lastDragScenePos = scenePos;
 
     if (isResizeRole(role)) {
-        std::cout << "hit the resize box" << std::endl;
         m_resizeStartBounds = boundingRect();
     }
 }

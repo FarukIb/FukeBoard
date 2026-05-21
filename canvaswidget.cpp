@@ -2,7 +2,6 @@
 
 #include <QMouseEvent>
 #include <QLineEdit>
-#include <iostream>
 
 namespace {
 constexpr int DeltaXAfterCopy = 30;
@@ -33,6 +32,7 @@ void CanvasWidget::setMode(Mode mode) {
     m_mode = mode;
     m_selection.clear();
     m_activeHitbox.reset();
+    resetCanvasCursor();
     update();
 }
 
@@ -85,23 +85,47 @@ void CanvasWidget::registerHitboxOwner(HitboxOwner *owner)
     m_hitboxOwners.push_back(owner);
 }
 
+Hitbox *CanvasWidget::hitboxAtForOwner(HitboxOwner *owner, const QPointF &scenePos) const
+{
+    if (!owner) {
+        return nullptr;
+    }
+
+    std::vector<Hitbox*> hitboxes = owner->hitboxes();
+
+    for (auto hitboxIt = hitboxes.rbegin(); hitboxIt != hitboxes.rend(); ++hitboxIt) {
+        Hitbox *hitbox = *hitboxIt;
+
+        if (hitbox && hitbox->owner && hitbox->contains(scenePos)) {
+            return hitbox;
+        }
+    }
+
+    return nullptr;
+}
+
 Hitbox *CanvasWidget::hitboxAt(const QPointF &scenePos) const
 {
+    // 1. First check registered non-item owners, for example SelectionController.
     for (auto ownerIt = m_hitboxOwners.rbegin(); ownerIt != m_hitboxOwners.rend(); ++ownerIt) {
         HitboxOwner *owner = *ownerIt;
 
-        if (!owner) {
+        if (Hitbox *hitbox = hitboxAtForOwner(owner, scenePos)) {
+            return hitbox;
+        }
+    }
+
+    // 2. Then check canvas items that are also HitboxOwner.
+    // Reverse order because topmost/latest item should win.
+    for (auto itemIt = m_items.rbegin(); itemIt != m_items.rend(); ++itemIt) {
+        CanvasItem *item = itemIt->get();
+
+        if (!item) {
             continue;
         }
 
-        std::vector<Hitbox*> hitboxes = owner->hitboxes();
-
-        for (auto hitboxIt = hitboxes.rbegin(); hitboxIt != hitboxes.rend(); ++hitboxIt) {
-            Hitbox *hitbox = *hitboxIt;
-
-            if (hitbox && hitbox->owner && hitbox->contains(scenePos)) {
-                if ((*hitboxIt)->role > 2)
-                    std::cout << "hit a non body box" << std::endl;
+        if (auto owner = dynamic_cast<HitboxOwner*>(item)) {
+            if (Hitbox *hitbox = hitboxAtForOwner(owner, scenePos)) {
                 return hitbox;
             }
         }
@@ -109,16 +133,13 @@ Hitbox *CanvasWidget::hitboxAt(const QPointF &scenePos) const
 
     return nullptr;
 }
-
 void CanvasWidget::clearActiveHitboxIfOwnedBy(HitboxOwner *owner)
 {
     if (!m_activeHitbox.has_value()) {
         return;
     }
 
-    Hitbox *activeHitbox = *m_activeHitbox;
-
-    if (activeHitbox && activeHitbox->owner == owner) {
+    if (m_activeHitbox->owner == owner) {
         m_activeHitbox.reset();
     }
 }
@@ -129,7 +150,14 @@ void CanvasWidget::handleHitboxPress(Hitbox *hitbox, const QPointF &scenePos)
         return;
     }
 
-    m_activeHitbox = hitbox;
+    m_activeHitbox = ActiveHitbox {
+        .owner = hitbox->owner,
+        .role = hitbox->role,
+        .cursorShape = hitbox->cursorShape
+    };
+
+    setCursor(hitbox->cursor());
+
     hitbox->owner->onHitboxPressed(hitbox->role, scenePos);
     update();
 }
@@ -140,15 +168,16 @@ bool CanvasWidget::handleActiveHitboxDrag(const QPointF &scenePos)
         return false;
     }
 
-    Hitbox *hitbox = *m_activeHitbox;
+    ActiveHitbox &active = *m_activeHitbox;
 
-    if (!hitbox || !hitbox->owner) {
+    if (!active.owner) {
         m_activeHitbox.reset();
         return false;
     }
 
-    hitbox->owner->onHitboxDragged(hitbox->role, scenePos);
+    active.owner->onHitboxDragged(active.role, scenePos);
     update();
+
     return true;
 }
 
@@ -158,15 +187,51 @@ bool CanvasWidget::handleActiveHitboxRelease(const QPointF &scenePos)
         return false;
     }
 
-    Hitbox *hitbox = *m_activeHitbox;
+    ActiveHitbox active = *m_activeHitbox;
 
-    if (hitbox && hitbox->owner) {
-        hitbox->owner->onHitboxReleased(hitbox->role, scenePos);
+    if (active.owner) {
+        active.owner->onHitboxReleased(active.role, scenePos);
     }
 
     m_activeHitbox.reset();
+
+    updateCursorForPosition(scenePos);
     update();
+
     return true;
+}
+
+void CanvasWidget::updateCursorForPosition(const QPointF &scenePos)
+{
+    if (m_panning || m_activeHitbox.has_value()) {
+        return;
+    }
+
+    if (m_mode == Mode::Select) {
+        if (Hitbox *hitbox = hitboxAt(scenePos)) {
+            setCursor(hitbox->cursor());
+            return;
+        }
+    }
+
+    resetCanvasCursor();
+}
+
+void CanvasWidget::resetCanvasCursor()
+{
+    switch (m_mode) {
+    case Mode::Pen:
+        setCursor(Qt::CrossCursor);
+        return;
+
+    case Mode::Erase:
+        setCursor(Qt::PointingHandCursor);
+        return;
+
+    case Mode::Select:
+        setCursor(Qt::ArrowCursor);
+        return;
+    }
 }
 
 void CanvasWidget::drawGrid(QPainter &painter, const QRectF &visibleScene) {
@@ -261,6 +326,17 @@ void CanvasWidget::handleSelectPress(const QPointF &scenePos)
     update();
 }
 
+void CanvasWidget::clearActiveHitboxIfOwnedByItem(CanvasItem *item)
+{
+    if (!item) {
+        return;
+    }
+
+    if (auto owner = dynamic_cast<HitboxOwner*>(item)) {
+        clearActiveHitboxIfOwnedBy(owner);
+    }
+}
+
 void CanvasWidget::eraseAt(const QPointF &scenePos) {
     if (m_items.empty()) {
         return;
@@ -271,6 +347,7 @@ void CanvasWidget::eraseAt(const QPointF &scenePos) {
             m_selection.clear();
             m_activeHitbox.reset();
 
+            clearActiveHitboxIfOwnedByItem(m_items[i].get());
             m_items.erase(m_items.begin() + i);
             update();
             return;
@@ -324,6 +401,8 @@ void CanvasWidget::continueErasing(const QPointF &scenePos) {
 void CanvasWidget::mouseMoveEvent(QMouseEvent *event) {
     const QPointF scenePos = screenToScene(event->position());
 
+    updateCursorForPosition(scenePos);
+
     if (m_panning) {
         continuePanning(event->position());
         return;
@@ -357,7 +436,7 @@ void CanvasWidget::mouseMoveEvent(QMouseEvent *event) {
 
 void CanvasWidget::finishPanning() {
     m_panning = false;
-    unsetCursor();
+    resetCanvasCursor();
 }
 
 void CanvasWidget::finishPenStroke() {

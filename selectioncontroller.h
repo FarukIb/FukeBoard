@@ -68,16 +68,15 @@ private:
     struct RoleData {
         bool resize = false;
 
-        // Where the handle is drawn on the selection bounds.
-        // 0 = left/top, 0.5 = center, 1 = right/bottom.
         qreal xFactor = 0.0;
         qreal yFactor = 0.0;
 
-        // Which side this handle changes.
         bool changesLeft = false;
         bool changesTop = false;
         bool changesRight = false;
         bool changesBottom = false;
+
+        Qt::CursorShape cursorShape = Qt::ArrowCursor;
     };
     static const std::array<RoleData, Role::Count> &roleData();
 

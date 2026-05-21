@@ -57,3 +57,26 @@ void StrokeItem::transformFromRect(const QRectF &oldRect, const QRectF &newRect)
 
     m_path = transform.map(m_path);
 }
+
+std::vector<Hitbox*> CanvasItem::hitboxes()
+{
+    return {};
+}
+
+void CanvasItem::onHitboxPressed(int role, const QPointF &scenePos)
+{
+    Q_UNUSED(role);
+    Q_UNUSED(scenePos);
+}
+
+void CanvasItem::onHitboxDragged(int role, const QPointF &scenePos)
+{
+    Q_UNUSED(role);
+    Q_UNUSED(scenePos);
+}
+
+void CanvasItem::onHitboxReleased(int role, const QPointF &scenePos)
+{
+    Q_UNUSED(role);
+    Q_UNUSED(scenePos);
+}
