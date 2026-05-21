@@ -207,6 +207,7 @@ void CanvasWidget::drawCurrentStroke(QPainter &painter) {
 
 void CanvasWidget::drawSelection(QPainter &painter)
 {
+    m_selection.setViewScale(m_zoom);
     m_selection.paint(painter);
 }
 

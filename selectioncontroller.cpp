@@ -8,8 +8,9 @@ const Qt::PenStyle SelectionLineType = Qt::DashLine;
 const int SelectionLineWidth = 1;
 const QColor SelectionRectangleColour = QColor(0, 120, 215, 40);
 
-constexpr qreal HandleSize = 10.0;
+constexpr qreal HandleScreenSize = 10.0;
 constexpr qreal MinSelectionSize = 5.0;
+constexpr QColor HitboxColour = QColor(255, 0, 0, 60);
 }
 
 SelectionController::SelectionController()
@@ -141,6 +142,16 @@ void SelectionController::initializeHitboxes()
         m_hitboxes[role].role = role;
         m_hitboxes[role].rect = QRectF();
     }
+}
+
+void SelectionController::setViewScale(qreal zoom) {
+    if (zoom < 0)
+    {
+        m_viewScale = 1.0;
+        return;
+    }
+    m_viewScale = zoom;
+    updateHitboxes();
 }
 
 void SelectionController::clear()
@@ -291,11 +302,12 @@ QPointF SelectionController::handleCenterForRole(Role role, const QRectF &bounds
 
 QRectF SelectionController::handleRectAt(const QPointF &center) const
 {
+    const qreal sceneSize = HandleScreenSize / m_viewScale;
     return QRectF(
-        center.x() - HandleSize / 2.0,
-        center.y() - HandleSize / 2.0,
-        HandleSize,
-        HandleSize
+        center.x() - sceneSize / 2.0,
+        center.y() - sceneSize / 2.0,
+        sceneSize,
+        sceneSize
         );
 }
 
@@ -323,7 +335,7 @@ void SelectionController::paint(QPainter &painter) const
     hitboxPen.setCosmetic(true);
 
     painter.setPen(hitboxPen);
-    painter.setBrush(QColor(255, 0, 0, 60));
+    painter.setBrush(HitboxColour);
 
     for (int role = Role::TopLeft; role < Role::Count; ++role) {
         painter.drawRect(m_hitboxes[role].rect);
@@ -390,7 +402,6 @@ void SelectionController::onHitboxDragged(int role, const QPointF &scenePos)
     }
 
     if (isResizeRole(role)) {
-        std::cout << "handling dragging of resize box" << std::endl;
         resizeSelectedItems(role, scenePos);
         return;
     }

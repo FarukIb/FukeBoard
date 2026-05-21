@@ -58,6 +58,8 @@ public:
 
     std::vector<Hitbox*> hitboxes() override;
 
+    void setViewScale(qreal zoom);
+
     void onHitboxPressed(int role, const QPointF &scenePos) override;
     void onHitboxDragged(int role, const QPointF &scenePos) override;
     void onHitboxReleased(int role, const QPointF &scenePos) override;
@@ -97,6 +99,7 @@ private:
     std::set<CanvasItem*> m_selectedItems;
 
     bool m_drawingSelectionRectangle = false;
+    qreal m_viewScale;
 
     QRectF m_resizeStartBounds;
     QPointF m_selectionStartScenePos;
