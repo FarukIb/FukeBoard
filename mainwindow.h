@@ -16,13 +16,16 @@ public:
 private:
     Mode mode;
     QColor m_penColor = AppConstants::DefaultPenColor;
+    QColor m_textColor = Qt::black;
+    QColor m_mileGridCellColor = QColor(20, 20, 20);
 
     CanvasWidget *m_canvas = nullptr;
 
-    QToolBar* toolbar;
-
     QToolBar *m_toolToolbar = nullptr;
+    QToolBar *m_insertToolbar = nullptr;
     QToolBar *m_optionsToolbar = nullptr;
+    QToolBar *m_historyToolbar = nullptr;
+    QToolBar *m_textToolbar = nullptr;
 
     QStackedWidget *m_optionsStack = nullptr;
 
@@ -31,6 +34,9 @@ private:
     QWidget *m_selectOptions = nullptr;
 
     void createToolToolbar();
+    void createInsertToolbar();
+    void createHistoryToolbar();
+    void createTextToolbar();
     void createOptionsToolbar();
 
     void selectPenMode();

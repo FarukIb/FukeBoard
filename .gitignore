@@ -82,3 +82,6 @@ CMakeLists.txt.user*
 .uic/
 /build*/
 /.qtcreator/
+
+# VSCode stuff
+.vscode/

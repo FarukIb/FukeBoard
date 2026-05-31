@@ -7,7 +7,9 @@
 #include <QPainter>
 #include <QPointF>
 #include <QRectF>
+#include <Qt>
 
+#include <array>
 #include <memory>
 #include <set>
 #include <vector>
@@ -47,6 +49,7 @@ public:
         const QRectF &rect,
         const std::vector<std::unique_ptr<CanvasItem>> &items
         );
+    void selectSingleItem(CanvasItem *item);
 
     void deleteSelectedItems(std::vector<std::unique_ptr<CanvasItem>> &items);
 
