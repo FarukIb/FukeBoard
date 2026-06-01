@@ -49,6 +49,7 @@ public:
     QString html() const;
     void setHtml(const QString &html);
     QString plainText() const;
+    bool containsMoveHandle(const QPointF &scenePos) const;
 
     static QFont textFont();
     void setViewScale(qreal zoom);

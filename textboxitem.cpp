@@ -224,6 +224,11 @@ QString TextBoxItem::plainText() const
     return document.toPlainText();
 }
 
+bool TextBoxItem::containsMoveHandle(const QPointF &scenePos) const
+{
+    return moveHandleRect().contains(scenePos);
+}
+
 QFont TextBoxItem::textFont()
 {
     QFont font;

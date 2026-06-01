@@ -18,6 +18,7 @@
 #include <QPushButton>
 #include <QColorDialog>
 #include <QColor>
+#include <QIcon>
 
 namespace {
 constexpr int DefaultWindowHeight = 1000;
@@ -33,6 +34,18 @@ constexpr int MinMileGridSize = 1;
 constexpr int MaxMileGridSize = 128;
 constexpr int DefaultMileGridColumns = 16;
 constexpr int DefaultMileGridRows = 8;
+
+QPushButton *createColorPresetButton(const QColor &color, QWidget *parent)
+{
+    auto *button = new QPushButton(parent);
+    button->setFixedSize(24, 24);
+    button->setToolTip(color.name());
+    button->setStyleSheet(QString(
+                              "QPushButton { background-color: %1; border: 1px solid #555; }"
+                              "QPushButton:hover { border: 2px solid #111; }"
+                              ).arg(color.name()));
+    return button;
+}
 }
 
 MainWindow::MainWindow(QWidget *parent)
@@ -52,6 +65,7 @@ MainWindow::MainWindow(QWidget *parent)
 
     resize(DefaultWindowHeight, DefaultWindowWidth);
     setWindowTitle("FukeBoard");
+    setWindowIcon(QIcon(":/icons/logo.png"));
 }
 
 void MainWindow::createFileMenu()
@@ -192,12 +206,18 @@ void MainWindow::createToolToolbar() {
 
     auto *selectPenAction = new QAction("Pen mode", this);
     selectPenAction->setCheckable(true);
+    selectPenAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_1));
+    selectPenAction->setToolTip("Pen mode (Ctrl+1)");
 
     auto *selectEraserAction = new QAction("Eraser mode", this);
     selectEraserAction->setCheckable(true);
+    selectEraserAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_2));
+    selectEraserAction->setToolTip("Eraser mode (Ctrl+2)");
 
     auto *selectSelectAction = new QAction("Select mode", this);
     selectSelectAction->setCheckable(true);
+    selectSelectAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_3));
+    selectSelectAction->setToolTip("Select mode (Ctrl+3)");
 
     toolGroup->addAction(selectPenAction);
     toolGroup->addAction(selectEraserAction);
@@ -220,14 +240,22 @@ void MainWindow::createInsertToolbar()
 
     auto *insertImageAction = new QAction("Insert Image", this);
     auto *insertMileGridAction = new QAction("Mile Grid", this);
-    auto *mileGridColorButton = new QPushButton("Cell Color", this);
+    auto *mileGridColorButton = new QPushButton("Cell Colour", this);
     mileGridColorButton->setStyleSheet(
         QString("background-color: %1").arg(m_mileGridCellColor.name())
         );
+    auto *mileGridRedButton = createColorPresetButton(Qt::red, this);
+    auto *mileGridBlueButton = createColorPresetButton(Qt::blue, this);
+    auto *mileGridGreenButton = createColorPresetButton(Qt::green, this);
+    auto *mileGridBlackButton = createColorPresetButton(Qt::black, this);
 
     m_insertToolbar->addAction(insertImageAction);
     m_insertToolbar->addAction(insertMileGridAction);
     m_insertToolbar->addWidget(mileGridColorButton);
+    m_insertToolbar->addWidget(mileGridRedButton);
+    m_insertToolbar->addWidget(mileGridBlueButton);
+    m_insertToolbar->addWidget(mileGridGreenButton);
+    m_insertToolbar->addWidget(mileGridBlackButton);
 
     connect(insertImageAction, &QAction::triggered,
             this, [this]() {
@@ -280,7 +308,7 @@ void MainWindow::createInsertToolbar()
                 QColor selectedColor = QColorDialog::getColor(
                     m_mileGridCellColor,
                     this,
-                    "Choose Mile Grid cell color"
+                    "Choose Mile Grid cell colour"
                     );
 
                 if (!selectedColor.isValid()) {
@@ -292,6 +320,31 @@ void MainWindow::createInsertToolbar()
                     QString("background-color: %1").arg(m_mileGridCellColor.name())
                     );
                 m_canvas->setMileGridCellColor(m_mileGridCellColor);
+            });
+
+    auto applyMileGridColor = [this, mileGridColorButton](const QColor &color) {
+        m_mileGridCellColor = color;
+        mileGridColorButton->setStyleSheet(
+            QString("background-color: %1").arg(m_mileGridCellColor.name())
+            );
+        m_canvas->setMileGridCellColor(m_mileGridCellColor);
+    };
+
+    connect(mileGridRedButton, &QPushButton::clicked,
+            this, [applyMileGridColor]() {
+                applyMileGridColor(Qt::red);
+            });
+    connect(mileGridBlueButton, &QPushButton::clicked,
+            this, [applyMileGridColor]() {
+                applyMileGridColor(Qt::blue);
+            });
+    connect(mileGridGreenButton, &QPushButton::clicked,
+            this, [applyMileGridColor]() {
+                applyMileGridColor(Qt::green);
+            });
+    connect(mileGridBlackButton, &QPushButton::clicked,
+            this, [applyMileGridColor]() {
+                applyMileGridColor(Qt::black);
             });
 }
 
@@ -335,8 +388,12 @@ void MainWindow::createTextToolbar()
     underlineAction->setCheckable(true);
     underlineAction->setShortcut(QKeySequence(Qt::CTRL | Qt::Key_U));
 
-    auto *textColorButton = new QPushButton("Text Color", this);
+    auto *textColorButton = new QPushButton("Text Colour", this);
     textColorButton->setStyleSheet(QString("background-color: %1").arg(m_textColor.name()));
+    auto *textRedButton = createColorPresetButton(Qt::red, this);
+    auto *textBlueButton = createColorPresetButton(Qt::blue, this);
+    auto *textGreenButton = createColorPresetButton(Qt::green, this);
+    auto *textBlackButton = createColorPresetButton(Qt::black, this);
 
     m_textToolbar->addWidget(fontComboBox);
     m_textToolbar->addWidget(fontSizeSpinBox);
@@ -344,6 +401,10 @@ void MainWindow::createTextToolbar()
     m_textToolbar->addAction(italicAction);
     m_textToolbar->addAction(underlineAction);
     m_textToolbar->addWidget(textColorButton);
+    m_textToolbar->addWidget(textRedButton);
+    m_textToolbar->addWidget(textBlueButton);
+    m_textToolbar->addWidget(textGreenButton);
+    m_textToolbar->addWidget(textBlackButton);
 
     connect(fontComboBox, &QFontComboBox::currentFontChanged,
             this, [this](const QFont &font) {
@@ -369,7 +430,7 @@ void MainWindow::createTextToolbar()
                 QColor selectedColor = QColorDialog::getColor(
                     m_textColor,
                     this,
-                    "Choose text color"
+                    "Choose text colour"
                     );
 
                 if (!selectedColor.isValid()) {
@@ -382,6 +443,31 @@ void MainWindow::createTextToolbar()
                     );
 
                 m_canvas->setActiveTextColor(m_textColor);
+            });
+
+    auto applyTextColor = [this, textColorButton](const QColor &color) {
+        m_textColor = color;
+        textColorButton->setStyleSheet(
+            QString("background-color: %1").arg(m_textColor.name())
+            );
+        m_canvas->setActiveTextColor(m_textColor);
+    };
+
+    connect(textRedButton, &QPushButton::clicked,
+            this, [applyTextColor]() {
+                applyTextColor(Qt::red);
+            });
+    connect(textBlueButton, &QPushButton::clicked,
+            this, [applyTextColor]() {
+                applyTextColor(Qt::blue);
+            });
+    connect(textGreenButton, &QPushButton::clicked,
+            this, [applyTextColor]() {
+                applyTextColor(Qt::green);
+            });
+    connect(textBlackButton, &QPushButton::clicked,
+            this, [applyTextColor]() {
+                applyTextColor(Qt::black);
             });
 }
 
@@ -413,14 +499,22 @@ QWidget* MainWindow::createPenOptions()
     widthSpinBox->setRange(MinPenWidth, MaxPenWidth);
     widthSpinBox->setValue(AppConstants::DefaultPenWidth);
 
-    auto *colorButton = new QPushButton("Color", widget);
+    auto *colorButton = new QPushButton("Pen Colour", widget);
     colorButton->setStyleSheet(
         QString("background-color: %1").arg(m_penColor.name())
         );
+    auto *penRedButton = createColorPresetButton(Qt::red, widget);
+    auto *penBlueButton = createColorPresetButton(Qt::blue, widget);
+    auto *penGreenButton = createColorPresetButton(Qt::green, widget);
+    auto *penBlackButton = createColorPresetButton(Qt::black, widget);
 
     layout->addWidget(widthLabel);
     layout->addWidget(widthSpinBox);
     layout->addWidget(colorButton);
+    layout->addWidget(penRedButton);
+    layout->addWidget(penBlueButton);
+    layout->addWidget(penGreenButton);
+    layout->addWidget(penBlackButton);
     layout->addStretch();
 
     connect(widthSpinBox, &QSpinBox::valueChanged,
@@ -453,6 +547,31 @@ QWidget* MainWindow::createPenOptions()
                           << std::endl;
 
                 m_canvas->setPenColor(m_penColor);
+            });
+
+    auto applyPenColor = [this, colorButton](const QColor &color) {
+        m_penColor = color;
+        colorButton->setStyleSheet(
+            QString("background-color: %1").arg(m_penColor.name())
+            );
+        m_canvas->setPenColor(m_penColor);
+    };
+
+    connect(penRedButton, &QPushButton::clicked,
+            this, [applyPenColor]() {
+                applyPenColor(Qt::red);
+            });
+    connect(penBlueButton, &QPushButton::clicked,
+            this, [applyPenColor]() {
+                applyPenColor(Qt::blue);
+            });
+    connect(penGreenButton, &QPushButton::clicked,
+            this, [applyPenColor]() {
+                applyPenColor(Qt::green);
+            });
+    connect(penBlackButton, &QPushButton::clicked,
+            this, [applyPenColor]() {
+                applyPenColor(Qt::black);
             });
 
     return widget;

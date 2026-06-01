@@ -708,7 +708,14 @@ void CanvasWidget::handleHitboxPress(Hitbox *hitbox, const QPointF &scenePos)
 
     if (auto *item = dynamic_cast<CanvasItem*>(hitbox->owner)) {
         bringItemToTop(item);
-        m_selection.selectSingleItem(item);
+
+        const bool shouldSelectItem =
+            !dynamic_cast<TextBoxItem*>(item) ||
+            hitbox->role == TextBoxItem::Role::MoveHandle;
+
+        if (shouldSelectItem) {
+            m_selection.selectSingleItem(item);
+        }
     }
 
     setCursor(hitbox->cursor());
@@ -937,6 +944,11 @@ void CanvasWidget::handleSelectPress(const QPointF &scenePos)
     }
 
     if (CanvasItem *item = itemAt(scenePos)) {
+        if (auto *textBox = dynamic_cast<TextBoxItem*>(item);
+            textBox && !textBox->containsMoveHandle(scenePos)) {
+            return;
+        }
+
         bringItemToTop(item);
         m_selection.selectSingleItem(item);
         update();
@@ -1156,6 +1168,15 @@ void CanvasWidget::keyPressEvent(QKeyEvent *event)
         }
     }
 
+    if (event->key() == Qt::Key_Escape) {
+        m_selection.clear();
+        m_activeHitbox.reset();
+        resetCanvasCursor();
+        update();
+        event->accept();
+        return;
+    }
+
     QWidget::keyPressEvent(event);
 }
 
@@ -1209,7 +1230,11 @@ bool CanvasWidget::eventFilter(QObject *watched, QEvent *event)
             auto *keyEvent = static_cast<QKeyEvent*>(event);
 
             if (keyEvent->key() == Qt::Key_Escape) {
-                cancelActiveTextEditor();
+                if (m_editingNewTextItem) {
+                    cancelActiveTextEditor();
+                } else {
+                    commitActiveTextEditor();
+                }
                 return true;
             }
 

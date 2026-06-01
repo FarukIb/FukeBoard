@@ -32,5 +32,8 @@ HEADERS += \
     strokeitem.h \
     textboxitem.h
 
+RESOURCES += \
+    resources.qrc
+
 DISTFILES += \
     thingslefttomake.md
