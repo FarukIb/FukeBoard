@@ -9,6 +9,7 @@ SOURCES += \
     canvascommand.cpp \
     canvasitem.cpp \
     canvaswidget.cpp \
+    fukearchive.cpp \
     imageitem.cpp \
     main.cpp \
     mainwindow.cpp \
@@ -22,6 +23,7 @@ HEADERS += \
     canvascommand.h \
     canvasitem.h \
     canvaswidget.h \
+    fukearchive.h \
     hitbox.h \
     imageitem.h \
     mainwindow.h \

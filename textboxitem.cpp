@@ -1,6 +1,7 @@
 #include "textboxitem.h"
 
 #include <QBrush>
+#include <QJsonObject>
 #include <QPainter>
 #include <QPen>
 #include <QPointF>
@@ -15,6 +16,26 @@ constexpr qreal MinTextBoxWidth = 40.0;
 constexpr qreal MinTextBoxHeight = 24.0;
 const QColor TextBoxOutlineColour(0, 120, 215);
 const QColor MoveHandleFillColour(0, 120, 215, 70);
+
+QJsonObject rectToJson(const QRectF &rect)
+{
+    return QJsonObject {
+        {"x", rect.x()},
+        {"y", rect.y()},
+        {"width", rect.width()},
+        {"height", rect.height()}
+    };
+}
+
+QRectF rectFromJson(const QJsonObject &json)
+{
+    return QRectF(
+        json.value("x").toDouble(),
+        json.value("y").toDouble(),
+        json.value("width").toDouble(),
+        json.value("height").toDouble()
+        );
+}
 }
 
 TextBoxItem::TextBoxItem()
@@ -224,6 +245,29 @@ void TextBoxItem::setViewScale(qreal zoom)
 std::unique_ptr<CanvasItem> TextBoxItem::clone() const
 {
     return std::make_unique<TextBoxItem>(*this);
+}
+
+QJsonObject TextBoxItem::serialize(CanvasSerializationContext &context) const
+{
+    Q_UNUSED(context);
+
+    return QJsonObject {
+        {"type", "textBox"},
+        {"id", QString::number(id())},
+        {"rect", rectToJson(m_rect)},
+        {"html", m_html}
+    };
+}
+
+bool TextBoxItem::deserialize(const QJsonObject &json, const CanvasDeserializationContext &context)
+{
+    Q_UNUSED(context);
+
+    m_rect = rectFromJson(json.value("rect").toObject()).normalized();
+    m_html = json.value("html").toString();
+    updateHitboxes();
+
+    return true;
 }
 
 std::vector<Hitbox*> TextBoxItem::hitboxes()

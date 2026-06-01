@@ -22,6 +22,8 @@ public:
     void transformFromRect(const QRectF &oldRect, const QRectF &newRect) override;
 
     std::unique_ptr<CanvasItem> clone() const override;
+    QJsonObject serialize(CanvasSerializationContext &context) const override;
+    bool deserialize(const QJsonObject &json, const CanvasDeserializationContext &context) override;
 
 private:
     QPainterPath m_path;

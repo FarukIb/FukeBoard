@@ -54,6 +54,8 @@ public:
     void setViewScale(qreal zoom);
 
     std::unique_ptr<CanvasItem> clone() const override;
+    QJsonObject serialize(CanvasSerializationContext &context) const override;
+    bool deserialize(const QJsonObject &json, const CanvasDeserializationContext &context) override;
 
     std::vector<Hitbox*> hitboxes() override;
     void onHitboxPressed(int role, const QPointF &scenePos) override;

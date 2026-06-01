@@ -1,5 +1,6 @@
 #include "canvaswidget.h"
 
+#include "fukearchive.h"
 #include "imageitem.h"
 #include "milegriditem.h"
 #include "strokeitem.h"
@@ -10,11 +11,19 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QEvent>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonValue>
 #include <QKeyEvent>
 #include <QMimeData>
 #include <QMouseEvent>
+#include <QPageLayout>
+#include <QPageSize>
 #include <QPainter>
 #include <QPalette>
+#include <QPdfWriter>
+#include <QTimer>
 #include <QTextEdit>
 #include <QTextCursor>
 #include <QTextCharFormat>
@@ -42,6 +51,7 @@ constexpr qreal TextDocumentSceneMargin = 4.0;
 constexpr qreal ZoomEpsilon = 0.0001;
 constexpr qreal DefaultImageMaxWidth = 420.0;
 constexpr qreal DefaultImageMaxHeight = 320.0;
+constexpr qreal PdfPageMarginMillimeters = 12.0;
 
 bool fuzzyRectEquals(const QRectF &left, const QRectF &right)
 {
@@ -227,6 +237,131 @@ void CanvasWidget::setMileGridCellColor(const QColor &color)
     MileGridItem::setCurrentColour(color);
 }
 
+bool CanvasWidget::saveFukeFile(const QString &filePath)
+{
+    commitActiveTextEditor();
+    clearPendingTextBoxCreation();
+
+    CanvasSerializationContext context;
+
+    QJsonArray itemsJson;
+    for (const auto &item : m_items) {
+        if (item) {
+            itemsJson.append(item->serialize(context));
+        }
+    }
+
+    const QJsonObject root {
+        {"format", "FukeBoard"},
+        {"version", 1},
+        {"items", itemsJson}
+    };
+
+    QMap<QString, QByteArray> entries = context.assets;
+    entries.insert("canvas.json", QJsonDocument(root).toJson(QJsonDocument::Indented));
+
+    return FukeArchive::write(filePath, entries);
+}
+
+bool CanvasWidget::loadFukeFile(const QString &filePath)
+{
+    commitActiveTextEditor();
+    clearPendingTextBoxCreation();
+
+    QMap<QString, QByteArray> entries;
+    if (!FukeArchive::read(filePath, &entries) || !entries.contains("canvas.json")) {
+        return false;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(entries.value("canvas.json"), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return false;
+    }
+
+    const QJsonObject root = document.object();
+    if (root.value("format").toString() != "FukeBoard") {
+        return false;
+    }
+
+    CanvasDeserializationContext context;
+    context.assets = entries;
+
+    std::vector<std::unique_ptr<CanvasItem>> loadedItems;
+    const QJsonArray itemsJson = root.value("items").toArray();
+    loadedItems.reserve(static_cast<std::size_t>(itemsJson.size()));
+
+    for (const QJsonValue &itemValue : itemsJson) {
+        std::unique_ptr<CanvasItem> item = CanvasItem::deserializeItem(itemValue.toObject(), context);
+        if (!item) {
+            return false;
+        }
+        loadedItems.push_back(std::move(item));
+    }
+
+    m_selection.clear();
+    m_activeHitbox.reset();
+    m_itemsBeforeHitboxDrag.clear();
+    m_undoStack.clear();
+    m_redoStack.clear();
+    m_items = std::move(loadedItems);
+    updateNextItemIdFromItems();
+    update();
+
+    return true;
+}
+
+bool CanvasWidget::exportPdf(const QString &filePath)
+{
+    commitActiveTextEditor();
+    clearPendingTextBoxCreation();
+
+    const QRectF sceneRect = allItemsBoundingRect();
+    if (sceneRect.isEmpty()) {
+        return false;
+    }
+
+    QPdfWriter writer(filePath);
+    writer.setPageSize(QPageSize(QPageSize::A4));
+    writer.setPageMargins(
+        QMarginsF(
+            PdfPageMarginMillimeters,
+            PdfPageMarginMillimeters,
+            PdfPageMarginMillimeters,
+            PdfPageMarginMillimeters
+            ),
+        QPageLayout::Millimeter
+        );
+    writer.setResolution(300);
+
+    QPainter painter(&writer);
+    if (!painter.isActive()) {
+        return false;
+    }
+
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    const QRect pageRect = writer.pageLayout().paintRectPixels(writer.resolution());
+    painter.fillRect(pageRect, Qt::white);
+
+    const qreal scale = std::min(
+        pageRect.width() / sceneRect.width(),
+        pageRect.height() / sceneRect.height()
+        );
+
+    painter.translate(pageRect.left(), pageRect.top());
+    painter.translate(
+        (pageRect.width() - sceneRect.width() * scale) / 2.0,
+        (pageRect.height() - sceneRect.height() * scale) / 2.0
+        );
+    painter.scale(scale, scale);
+    painter.translate(-sceneRect.left(), -sceneRect.top());
+
+    drawItems(painter);
+
+    return painter.end();
+}
+
 CanvasItem *CanvasWidget::itemAt(const QPointF &scenePos) const {
     if (m_items.empty())
         return nullptr;
@@ -235,6 +370,26 @@ CanvasItem *CanvasWidget::itemAt(const QPointF &scenePos) const {
             return m_items[i].get();
 
     return nullptr;
+}
+
+QRectF CanvasWidget::allItemsBoundingRect() const
+{
+    QRectF bounds;
+
+    for (const auto &item : m_items) {
+        if (!item) {
+            continue;
+        }
+
+        const QRectF itemBounds = item->boundingRect();
+        if (itemBounds.isEmpty()) {
+            continue;
+        }
+
+        bounds = bounds.isNull() ? itemBounds : bounds.united(itemBounds);
+    }
+
+    return bounds;
 }
 
 void CanvasWidget::bringItemToTop(CanvasItem *item)
@@ -621,7 +776,7 @@ bool CanvasWidget::handleMileGridTogglePress(CanvasItem *item, const QPointF &sc
         return false;
     }
 
-    pushSnapshotCommand(std::move(before), cloneItems());
+    pushSnapshotCommand(std::move(before), cloneItems(), true);
     update();
 
     return true;
@@ -1039,7 +1194,17 @@ void CanvasWidget::wheelEvent(QWheelEvent *event)
 
 bool CanvasWidget::eventFilter(QObject *watched, QEvent *event)
 {
-    if (watched == m_activeTextEditor) {
+    const bool isTextEditorEvent =
+        watched == m_activeTextEditor ||
+        (m_activeTextEditor && watched == m_activeTextEditor->viewport());
+
+    if (isTextEditorEvent) {
+        if (event->type() == QEvent::Wheel) {
+            auto *wheelEvent = static_cast<QWheelEvent*>(event);
+            handleZoom(mapFromGlobal(wheelEvent->globalPosition().toPoint()), wheelEvent->angleDelta().y());
+            return true;
+        }
+
         if (event->type() == QEvent::KeyPress) {
             auto *keyEvent = static_cast<QKeyEvent*>(event);
 
@@ -1052,6 +1217,12 @@ bool CanvasWidget::eventFilter(QObject *watched, QEvent *event)
                 (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter)) {
                 commitActiveTextEditor();
                 return true;
+            }
+
+            if (keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) {
+                QTimer::singleShot(0, this, [this]() {
+                    mergeActiveTextCharFormat(scaledToolbarTextFormat());
+                });
             }
         }
     }
@@ -1133,13 +1304,14 @@ void CanvasWidget::beginEditingTextBox(TextBoxItem *item)
     editor->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     editor->setLineWrapMode(QTextEdit::WidgetWidth);
     editor->setStyleSheet("QTextEdit { background: transparent; color: black; border: none; padding: 0px; }");
+    editor->moveCursor(QTextCursor::End);
     configureActiveTextEditorAppearance();
     mergeActiveTextCharFormat(scaledToolbarTextFormat());
     editor->installEventFilter(this);
+    editor->viewport()->installEventFilter(this);
     updateActiveTextEditorGeometry();
     editor->show();
     editor->setFocus();
-    editor->moveCursor(QTextCursor::End);
     update();
 }
 
@@ -1175,6 +1347,7 @@ void CanvasWidget::beginCreatingTextBox(const QPointF &scenePos)
     configureActiveTextEditorAppearance();
     mergeActiveTextCharFormat(scaledToolbarTextFormat());
     editor->installEventFilter(this);
+    editor->viewport()->installEventFilter(this);
     updateActiveTextEditorGeometry();
     editor->show();
     editor->setFocus();
@@ -1218,6 +1391,7 @@ void CanvasWidget::commitActiveTextEditor()
     pushSnapshotCommand(std::move(before), cloneItems(), shouldForceSnapshot);
 
     editor->removeEventFilter(this);
+    editor->viewport()->removeEventFilter(this);
     editor->deleteLater();
     m_activeTextEditor.clear();
     m_editingTextItemId = InvalidCanvasItemId;
@@ -1243,6 +1417,7 @@ void CanvasWidget::cancelActiveTextEditor()
 
     QTextEdit *editor = m_activeTextEditor;
     editor->removeEventFilter(this);
+    editor->viewport()->removeEventFilter(this);
     editor->deleteLater();
 
     if (m_editingNewTextItem && m_hasTextEditSnapshot) {

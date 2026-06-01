@@ -5,11 +5,15 @@
 #include <QLabel>
 #include <QKeySequence>
 #include <QBoxLayout>
+#include <QMenu>
+#include <QMenuBar>
+#include <QMessageBox>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFontComboBox>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QFileInfo>
 #include <QSpinBox>
 #include <QPushButton>
 #include <QColorDialog>
@@ -37,6 +41,7 @@ MainWindow::MainWindow(QWidget *parent)
     m_canvas = new CanvasWidget(this);
     setCentralWidget(m_canvas);
 
+    createFileMenu();
     createToolToolbar();
     createInsertToolbar();
     createHistoryToolbar();
@@ -47,6 +52,136 @@ MainWindow::MainWindow(QWidget *parent)
 
     resize(DefaultWindowHeight, DefaultWindowWidth);
     setWindowTitle("FukeBoard");
+}
+
+void MainWindow::createFileMenu()
+{
+    QMenu *fileMenu = menuBar()->addMenu("File");
+
+    auto *openAction = new QAction("Open...", this);
+    openAction->setShortcut(QKeySequence::Open);
+
+    auto *saveAction = new QAction("Save...", this);
+    saveAction->setShortcut(QKeySequence::Save);
+
+    auto *saveAsAction = new QAction("Save As...", this);
+    saveAsAction->setShortcut(QKeySequence::SaveAs);
+
+    auto *savePdfAsAction = new QAction("Save as PDF...", this);
+
+    fileMenu->addAction(openAction);
+    fileMenu->addAction(saveAction);
+    fileMenu->addAction(saveAsAction);
+    fileMenu->addSeparator();
+    fileMenu->addAction(savePdfAsAction);
+
+    connect(openAction, &QAction::triggered, this, &MainWindow::openFukeFile);
+    connect(saveAction, &QAction::triggered, this, &MainWindow::saveFukeFile);
+    connect(saveAsAction, &QAction::triggered, this, &MainWindow::saveFukeFileAs);
+    connect(savePdfAsAction, &QAction::triggered, this, &MainWindow::savePdfFileAs);
+}
+
+void MainWindow::openFukeFile()
+{
+    const QString filePath = QFileDialog::getOpenFileName(
+        this,
+        "Open FukeBoard File",
+        QString(),
+        "FukeBoard Files (*.fuke);;All Files (*)"
+        );
+
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    if (!m_canvas->loadFukeFile(filePath)) {
+        QMessageBox::warning(this, "Open Failed", "Could not open the selected .fuke file.");
+        return;
+    }
+
+    m_currentFilePath = filePath;
+}
+
+void MainWindow::saveFukeFile()
+{
+    QString filePath = m_currentFilePath;
+
+    if (filePath.isEmpty()) {
+        filePath = QFileDialog::getSaveFileName(
+            this,
+            "Save FukeBoard File",
+            QString(),
+            "FukeBoard Files (*.fuke);;All Files (*)"
+            );
+    }
+
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    if (!filePath.endsWith(".fuke", Qt::CaseInsensitive)) {
+        filePath += ".fuke";
+    }
+
+    if (!m_canvas->saveFukeFile(filePath)) {
+        QMessageBox::warning(this, "Save Failed", "Could not save the .fuke file.");
+        return;
+    }
+
+    m_currentFilePath = filePath;
+}
+
+void MainWindow::saveFukeFileAs()
+{
+    QString filePath = QFileDialog::getSaveFileName(
+        this,
+        "Save FukeBoard File As",
+        m_currentFilePath,
+        "FukeBoard Files (*.fuke);;All Files (*)"
+        );
+
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    if (!filePath.endsWith(".fuke", Qt::CaseInsensitive)) {
+        filePath += ".fuke";
+    }
+
+    if (!m_canvas->saveFukeFile(filePath)) {
+        QMessageBox::warning(this, "Save Failed", "Could not save the .fuke file.");
+        return;
+    }
+
+    m_currentFilePath = filePath;
+}
+
+void MainWindow::savePdfFileAs()
+{
+    QString suggestedPath;
+    if (!m_currentFilePath.isEmpty()) {
+        QFileInfo fileInfo(m_currentFilePath);
+        suggestedPath = fileInfo.path() + "/" + fileInfo.completeBaseName() + ".pdf";
+    }
+
+    QString filePath = QFileDialog::getSaveFileName(
+        this,
+        "Save Canvas as PDF",
+        suggestedPath,
+        "PDF Files (*.pdf);;All Files (*)"
+        );
+
+    if (filePath.isEmpty()) {
+        return;
+    }
+
+    if (!filePath.endsWith(".pdf", Qt::CaseInsensitive)) {
+        filePath += ".pdf";
+    }
+
+    if (!m_canvas->exportPdf(filePath)) {
+        QMessageBox::warning(this, "PDF Export Failed", "Could not save the canvas as a PDF.");
+    }
 }
 
 void MainWindow::createToolToolbar() {

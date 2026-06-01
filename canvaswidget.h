@@ -49,6 +49,9 @@ public:
     bool pasteImageFromClipboard();
     bool insertMileGrid(int columns, int rows);
     void setMileGridCellColor(const QColor &color);
+    bool saveFukeFile(const QString &filePath);
+    bool loadFukeFile(const QString &filePath);
+    bool exportPdf(const QString &filePath);
 
     void setActiveTextFontFamily(const QString &family);
     void setActiveTextFontPointSize(int pointSize);
@@ -114,6 +117,7 @@ private:
     QPainterPath m_currentPath;
     bool m_drawing = false;
 
+    QRectF allItemsBoundingRect() const;
     QRectF selectedItemsBoundingRect() const;
     void selectItemsInsideRect(const QRectF &rect);
 

@@ -1,5 +1,6 @@
 #include "imageitem.h"
 
+#include <QJsonObject>
 #include <QPainter>
 #include <QPen>
 
@@ -10,6 +11,26 @@ constexpr qreal MinImageWidth = 20.0;
 constexpr qreal MinImageHeight = 20.0;
 const QColor ImageOutlineColour(0, 120, 215);
 const QColor MoveHandleFillColour(0, 120, 215, 70);
+
+QJsonObject rectToJson(const QRectF &rect)
+{
+    return QJsonObject {
+        {"x", rect.x()},
+        {"y", rect.y()},
+        {"width", rect.width()},
+        {"height", rect.height()}
+    };
+}
+
+QRectF rectFromJson(const QJsonObject &json)
+{
+    return QRectF(
+        json.value("x").toDouble(),
+        json.value("y").toDouble(),
+        json.value("width").toDouble(),
+        json.value("height").toDouble()
+        );
+}
 }
 
 ImageItem::ImageItem()
@@ -188,6 +209,27 @@ void ImageItem::setViewScale(qreal zoom)
 std::unique_ptr<CanvasItem> ImageItem::clone() const
 {
     return std::make_unique<ImageItem>(*this);
+}
+
+QJsonObject ImageItem::serialize(CanvasSerializationContext &context) const
+{
+    const QString assetPath = context.addImageAsset(m_image);
+
+    return QJsonObject {
+        {"type", "image"},
+        {"id", QString::number(id())},
+        {"rect", rectToJson(m_rect)},
+        {"asset", assetPath}
+    };
+}
+
+bool ImageItem::deserialize(const QJsonObject &json, const CanvasDeserializationContext &context)
+{
+    m_rect = rectFromJson(json.value("rect").toObject()).normalized();
+    m_image = context.imageAsset(json.value("asset").toString());
+    updateHitboxes();
+
+    return !m_image.isNull();
 }
 
 std::vector<Hitbox*> ImageItem::hitboxes()

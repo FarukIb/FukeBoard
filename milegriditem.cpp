@@ -1,5 +1,7 @@
 #include "milegriditem.h"
 
+#include <QJsonArray>
+#include <QJsonObject>
 #include <QPainter>
 #include <QPen>
 #include <algorithm>
@@ -29,6 +31,26 @@ QRectF defaultRectFor(const QPointF &position, int columns, int rows)
             std::max(1, columns) * MileGridConstants::DefaultCellSize,
             std::max(1, rows) * MileGridConstants::DefaultCellSize
             )
+        );
+}
+
+QJsonObject rectToJson(const QRectF &rect)
+{
+    return QJsonObject {
+        {"x", rect.x()},
+        {"y", rect.y()},
+        {"width", rect.width()},
+        {"height", rect.height()}
+    };
+}
+
+QRectF rectFromJson(const QJsonObject &json)
+{
+    return QRectF(
+        json.value("x").toDouble(),
+        json.value("y").toDouble(),
+        json.value("width").toDouble(),
+        json.value("height").toDouble()
         );
 }
 }
@@ -315,6 +337,60 @@ void MileGridItem::setViewScale(qreal zoom)
 std::unique_ptr<CanvasItem> MileGridItem::clone() const
 {
     return std::make_unique<MileGridItem>(*this);
+}
+
+QJsonObject MileGridItem::serialize(CanvasSerializationContext &context) const
+{
+    Q_UNUSED(context);
+
+    QJsonArray bits;
+    for (bool bit : m_bits) {
+        bits.append(bit);
+    }
+
+    QJsonArray colors;
+    for (const QColor &color : m_bitColour) {
+        colors.append(color.name(QColor::HexArgb));
+    }
+
+    return QJsonObject {
+        {"type", "mileGrid"},
+        {"id", QString::number(id())},
+        {"rect", rectToJson(m_rect)},
+        {"columns", m_columns},
+        {"rows", m_rows},
+        {"bits", bits},
+        {"colors", colors}
+    };
+}
+
+bool MileGridItem::deserialize(const QJsonObject &json, const CanvasDeserializationContext &context)
+{
+    Q_UNUSED(context);
+
+    m_rect = rectFromJson(json.value("rect").toObject()).normalized();
+    m_columns = std::max(1, json.value("columns").toInt(1));
+    m_rows = std::max(1, json.value("rows").toInt(1));
+
+    const std::size_t expectedSize = static_cast<std::size_t>(m_columns * m_rows);
+    m_bits.assign(expectedSize, false);
+    m_bitColour.assign(expectedSize, MileGridConstants::DefaultCellColour);
+
+    const QJsonArray bits = json.value("bits").toArray();
+    for (int i = 0; i < bits.size() && i < static_cast<int>(expectedSize); ++i) {
+        m_bits[static_cast<std::size_t>(i)] = bits.at(i).toBool();
+    }
+
+    const QJsonArray colors = json.value("colors").toArray();
+    for (int i = 0; i < colors.size() && i < static_cast<int>(expectedSize); ++i) {
+        const QColor color(colors.at(i).toString());
+        if (color.isValid()) {
+            m_bitColour[static_cast<std::size_t>(i)] = color;
+        }
+    }
+
+    initializeHitboxes();
+    return true;
 }
 
 std::vector<Hitbox*> MileGridItem::hitboxes()

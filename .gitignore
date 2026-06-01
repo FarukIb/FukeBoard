@@ -83,5 +83,25 @@ CMakeLists.txt.user*
 /build*/
 /.qtcreator/
 
+# AppImage / packaging artifacts
+*.AppImage
+*.AppImage.disabled
+*.desktop
+Dockerfile*
+/AppDir/
+/appimagetool-extracted/
+/linuxdeploy-extracted/
+/linuxdeploy-plugin-qt-extracted/
+/disabled-appimages/
+/appimagetool-*
+/linuxdeploy-*
+/linuxdeploy-plugin-qt
+/FukeBoard-x86_64.AppImage
+/FukeBoard.png
+
+# Local build/test artifacts
+/FukeBoard
+/testfile
+
 # VSCode stuff
 .vscode/

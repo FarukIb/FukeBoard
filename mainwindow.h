@@ -5,6 +5,7 @@
 #include <QToolBar>
 #include <QStackedWidget>
 #include <QColor>
+#include <QString>
 #include "appconstants.h"
 #include "canvaswidget.h"
 
@@ -18,6 +19,7 @@ private:
     QColor m_penColor = AppConstants::DefaultPenColor;
     QColor m_textColor = Qt::black;
     QColor m_mileGridCellColor = QColor(20, 20, 20);
+    QString m_currentFilePath;
 
     CanvasWidget *m_canvas = nullptr;
 
@@ -33,6 +35,7 @@ private:
     QWidget *m_eraserOptions = nullptr;
     QWidget *m_selectOptions = nullptr;
 
+    void createFileMenu();
     void createToolToolbar();
     void createInsertToolbar();
     void createHistoryToolbar();
@@ -46,6 +49,10 @@ private:
     QWidget *createPenOptions();
     QWidget *createEraserOptions();
     QWidget *createSelectOptions();
+    void openFukeFile();
+    void saveFukeFile();
+    void saveFukeFileAs();
+    void savePdfFileAs();
 signals:
 };
 
