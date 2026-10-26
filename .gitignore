@@ -87,6 +87,7 @@ CMakeLists.txt.user*
 *.AppImage
 *.AppImage.disabled
 *.desktop
+!packaging/fukeboard.desktop
 Dockerfile*
 /AppDir/
 /appimagetool-extracted/

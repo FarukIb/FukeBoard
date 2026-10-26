@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=FukeBoard
+Comment=An infinite whiteboard application
+Exec=FukeBoard
+Icon=fukeboard-icon
+Categories=Graphics;Qt;
+Terminal=false
