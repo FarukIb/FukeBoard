@@ -8,8 +8,6 @@
 
 class CanvasWidget;
 
-using CanvasItemList = std::vector<std::unique_ptr<CanvasItem>>;
-
 class CanvasCommand
 {
 public:

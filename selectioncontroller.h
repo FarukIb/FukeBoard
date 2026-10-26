@@ -50,6 +50,7 @@ public:
         const std::vector<std::unique_ptr<CanvasItem>> &items
         );
     void selectSingleItem(CanvasItem *item);
+    void selectItems(const std::set<CanvasItem*> &items);
 
     void deleteSelectedItems(std::vector<std::unique_ptr<CanvasItem>> &items);
 

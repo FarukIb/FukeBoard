@@ -5,6 +5,7 @@
 #include <QToolBar>
 #include <QStackedWidget>
 #include <QColor>
+#include <QCloseEvent>
 #include <QString>
 #include "appconstants.h"
 #include "canvaswidget.h"
@@ -14,12 +15,15 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 public:
     explicit MainWindow(QWidget *parent = nullptr);
+protected:
+    void closeEvent(QCloseEvent *event) override;
 private:
     Mode mode;
     QColor m_penColor = AppConstants::DefaultPenColor;
     QColor m_textColor = Qt::black;
     QColor m_mileGridCellColor = QColor(20, 20, 20);
     QString m_currentFilePath;
+    bool m_hasUnsavedChanges = false;
 
     CanvasWidget *m_canvas = nullptr;
 

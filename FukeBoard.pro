@@ -7,6 +7,8 @@ CONFIG += c++20
 
 SOURCES += \
     canvascommand.cpp \
+    canvasfile.cpp \
+    canvasdocument.cpp \
     canvasitem.cpp \
     canvaswidget.cpp \
     fukearchive.cpp \
@@ -21,6 +23,8 @@ SOURCES += \
 HEADERS += \
     appconstants.h \
     canvascommand.h \
+    canvasfile.h \
+    canvasdocument.h \
     canvasitem.h \
     canvaswidget.h \
     fukearchive.h \
@@ -34,6 +38,3 @@ HEADERS += \
 
 RESOURCES += \
     resources.qrc
-
-DISTFILES += \
-    thingslefttomake.md

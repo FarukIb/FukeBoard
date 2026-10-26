@@ -53,6 +53,9 @@ MainWindow::MainWindow(QWidget *parent)
 {
     m_canvas = new CanvasWidget(this);
     setCentralWidget(m_canvas);
+    connect(m_canvas, &CanvasWidget::documentChanged, this, [this]() {
+        m_hasUnsavedChanges = true;
+    });
 
     createFileMenu();
     createToolToolbar();
@@ -114,6 +117,7 @@ void MainWindow::openFukeFile()
     }
 
     m_currentFilePath = filePath;
+    m_hasUnsavedChanges = false;
 }
 
 void MainWindow::saveFukeFile()
@@ -143,6 +147,7 @@ void MainWindow::saveFukeFile()
     }
 
     m_currentFilePath = filePath;
+    m_hasUnsavedChanges = false;
 }
 
 void MainWindow::saveFukeFileAs()
@@ -168,6 +173,36 @@ void MainWindow::saveFukeFileAs()
     }
 
     m_currentFilePath = filePath;
+    m_hasUnsavedChanges = false;
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    if (!m_hasUnsavedChanges) {
+        event->accept();
+        return;
+    }
+
+    const QMessageBox::StandardButton choice = QMessageBox::warning(
+        this,
+        "Unsaved Changes",
+        "Do you want to save your changes before exiting?",
+        QMessageBox::Save | QMessageBox::Discard | QMessageBox::Cancel,
+        QMessageBox::Save
+        );
+
+    if (choice == QMessageBox::Save) {
+        saveFukeFile();
+        if (!m_hasUnsavedChanges) {
+            event->accept();
+            return;
+        }
+    } else if (choice == QMessageBox::Discard) {
+        event->accept();
+        return;
+    }
+
+    event->ignore();
 }
 
 void MainWindow::savePdfFileAs()

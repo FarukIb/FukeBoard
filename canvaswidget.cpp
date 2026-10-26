@@ -1,6 +1,6 @@
 #include "canvaswidget.h"
 
-#include "fukearchive.h"
+#include "canvasfile.h"
 #include "imageitem.h"
 #include "milegriditem.h"
 #include "strokeitem.h"
@@ -11,11 +11,8 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QEvent>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonValue>
 #include <QKeyEvent>
+#include <QLineF>
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPageLayout>
@@ -52,16 +49,8 @@ constexpr qreal ZoomEpsilon = 0.0001;
 constexpr qreal DefaultImageMaxWidth = 420.0;
 constexpr qreal DefaultImageMaxHeight = 320.0;
 constexpr qreal PdfPageMarginMillimeters = 12.0;
-
-bool fuzzyRectEquals(const QRectF &left, const QRectF &right)
-{
-    constexpr qreal Epsilon = 0.001;
-
-    return std::abs(left.left() - right.left()) < Epsilon &&
-           std::abs(left.top() - right.top()) < Epsilon &&
-           std::abs(left.width() - right.width()) < Epsilon &&
-           std::abs(left.height() - right.height()) < Epsilon;
-}
+constexpr qreal DragThresholdScreenPixels = 3.0;
+constexpr qreal DotLineLength = 0.01;
 
 }
 
@@ -74,6 +63,8 @@ CanvasWidget::CanvasWidget(QWidget *parent)
     setStyleSheet("background-color: white;");
 
     registerHitboxOwner(&m_selection);
+    connect(QApplication::clipboard(), &QClipboard::dataChanged,
+            this, &CanvasWidget::clearCopiedItems);
 }
 
 void CanvasWidget::setMode(Mode mode) {
@@ -99,12 +90,12 @@ void CanvasWidget::deleteSelection() {
     commitActiveTextEditor();
     clearPendingTextBoxCreation();
 
-    CanvasItemList before = cloneItems();
+    CanvasItemList before = m_document.cloneItems();
 
     clearActiveHitboxIfOwnedBy(&m_selection);
-    m_selection.deleteSelectedItems(m_items);
+    m_selection.deleteSelectedItems(m_document.items());
 
-    pushSnapshotCommand(std::move(before), cloneItems());
+    pushSnapshotCommand(std::move(before), m_document.cloneItems());
     update();
 }
 
@@ -112,20 +103,80 @@ void CanvasWidget::duplicateSelection() {
     commitActiveTextEditor();
     clearPendingTextBoxCreation();
 
-    CanvasItemList before = cloneItems();
-    const std::size_t firstNewItemIndex = m_items.size();
+    CanvasItemList before = m_document.cloneItems();
+    const std::size_t firstNewItemIndex = m_document.items().size();
 
     m_selection.duplicateSelectedItems(
-        m_items,
+        m_document.items(),
         QPointF(DeltaXAfterCopy, DeltaYAfterCopy)
         );
 
-    for (std::size_t i = firstNewItemIndex; i < m_items.size(); ++i) {
-        assignFreshId(*m_items[i]);
+    for (std::size_t i = firstNewItemIndex; i < m_document.items().size(); ++i) {
+        m_document.assignFreshId(*m_document.items()[i]);
     }
 
-    pushSnapshotCommand(std::move(before), cloneItems());
+    pushSnapshotCommand(std::move(before), m_document.cloneItems());
     update();
+}
+
+bool CanvasWidget::copySelection()
+{
+    if (m_selection.empty()) {
+        return false;
+    }
+
+    m_copiedItems.clear();
+    m_copiedItems.reserve(m_selection.selectedItems().size());
+
+    for (CanvasItem *item : m_selection.selectedItems()) {
+        if (item) {
+            m_copiedItems.push_back(item->clone());
+        }
+    }
+
+    m_selectionPasteCount = 0;
+    return !m_copiedItems.empty();
+}
+
+bool CanvasWidget::pasteSelection()
+{
+    if (m_copiedItems.empty()) {
+        return false;
+    }
+
+    commitActiveTextEditor();
+    clearPendingTextBoxCreation();
+
+    CanvasItemList before = m_document.cloneItems();
+    std::set<CanvasItem*> pastedItems;
+    const qreal offset = (m_selectionPasteCount + 1) * DeltaXAfterCopy;
+
+    for (const auto &copiedItem : m_copiedItems) {
+        if (!copiedItem) {
+            continue;
+        }
+
+        std::unique_ptr<CanvasItem> item = copiedItem->clone();
+        item->moveBy(QPointF(offset, offset));
+        CanvasItem &addedItem = m_document.addItem(std::move(item));
+        pastedItems.insert(&addedItem);
+    }
+
+    if (pastedItems.empty()) {
+        return false;
+    }
+
+    ++m_selectionPasteCount;
+    m_selection.selectItems(pastedItems);
+    pushSnapshotCommand(std::move(before), m_document.cloneItems());
+    update();
+    return true;
+}
+
+void CanvasWidget::clearCopiedItems()
+{
+    m_copiedItems.clear();
+    m_selectionPasteCount = 0;
 }
 QPointF CanvasWidget::screenToScene(const QPointF &screenPoint) const {
     return (screenPoint - m_offset) / m_zoom;
@@ -170,13 +221,12 @@ bool CanvasWidget::insertImage(const QImage &image)
     commitActiveTextEditor();
     clearPendingTextBoxCreation();
 
-    CanvasItemList before = cloneItems();
+    CanvasItemList before = m_document.cloneItems();
 
     auto item = std::make_unique<ImageItem>(defaultImageRect(image), image);
-    assignFreshId(*item);
-    m_items.push_back(std::move(item));
+    m_document.addItem(std::move(item));
 
-    pushSnapshotCommand(std::move(before), cloneItems());
+    pushSnapshotCommand(std::move(before), m_document.cloneItems());
     update();
 
     return true;
@@ -209,7 +259,7 @@ bool CanvasWidget::insertMileGrid(int columns, int rows)
     commitActiveTextEditor();
     clearPendingTextBoxCreation();
 
-    CanvasItemList before = cloneItems();
+    CanvasItemList before = m_document.cloneItems();
 
     auto item = std::make_unique<MileGridItem>(
         visibleSceneCenter(),
@@ -217,10 +267,9 @@ bool CanvasWidget::insertMileGrid(int columns, int rows)
         rows,
         m_mileGridCellColor
         );
-    assignFreshId(*item);
-    m_items.push_back(std::move(item));
+    m_document.addItem(std::move(item));
 
-    pushSnapshotCommand(std::move(before), cloneItems());
+    pushSnapshotCommand(std::move(before), m_document.cloneItems());
     update();
 
     return true;
@@ -241,26 +290,7 @@ bool CanvasWidget::saveFukeFile(const QString &filePath)
 {
     commitActiveTextEditor();
     clearPendingTextBoxCreation();
-
-    CanvasSerializationContext context;
-
-    QJsonArray itemsJson;
-    for (const auto &item : m_items) {
-        if (item) {
-            itemsJson.append(item->serialize(context));
-        }
-    }
-
-    const QJsonObject root {
-        {"format", "FukeBoard"},
-        {"version", 1},
-        {"items", itemsJson}
-    };
-
-    QMap<QString, QByteArray> entries = context.assets;
-    entries.insert("canvas.json", QJsonDocument(root).toJson(QJsonDocument::Indented));
-
-    return FukeArchive::write(filePath, entries);
+    return CanvasFile::save(filePath, m_document.items());
 }
 
 bool CanvasWidget::loadFukeFile(const QString &filePath)
@@ -268,35 +298,9 @@ bool CanvasWidget::loadFukeFile(const QString &filePath)
     commitActiveTextEditor();
     clearPendingTextBoxCreation();
 
-    QMap<QString, QByteArray> entries;
-    if (!FukeArchive::read(filePath, &entries) || !entries.contains("canvas.json")) {
+    CanvasItemList loadedItems;
+    if (!CanvasFile::load(filePath, &loadedItems)) {
         return false;
-    }
-
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(entries.value("canvas.json"), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        return false;
-    }
-
-    const QJsonObject root = document.object();
-    if (root.value("format").toString() != "FukeBoard") {
-        return false;
-    }
-
-    CanvasDeserializationContext context;
-    context.assets = entries;
-
-    std::vector<std::unique_ptr<CanvasItem>> loadedItems;
-    const QJsonArray itemsJson = root.value("items").toArray();
-    loadedItems.reserve(static_cast<std::size_t>(itemsJson.size()));
-
-    for (const QJsonValue &itemValue : itemsJson) {
-        std::unique_ptr<CanvasItem> item = CanvasItem::deserializeItem(itemValue.toObject(), context);
-        if (!item) {
-            return false;
-        }
-        loadedItems.push_back(std::move(item));
     }
 
     m_selection.clear();
@@ -304,8 +308,7 @@ bool CanvasWidget::loadFukeFile(const QString &filePath)
     m_itemsBeforeHitboxDrag.clear();
     m_undoStack.clear();
     m_redoStack.clear();
-    m_items = std::move(loadedItems);
-    updateNextItemIdFromItems();
+    m_document.replaceItems(std::move(loadedItems));
     update();
 
     return true;
@@ -316,7 +319,7 @@ bool CanvasWidget::exportPdf(const QString &filePath)
     commitActiveTextEditor();
     clearPendingTextBoxCreation();
 
-    const QRectF sceneRect = allItemsBoundingRect();
+    const QRectF sceneRect = m_document.boundingRect();
     if (sceneRect.isEmpty()) {
         return false;
     }
@@ -362,124 +365,6 @@ bool CanvasWidget::exportPdf(const QString &filePath)
     return painter.end();
 }
 
-CanvasItem *CanvasWidget::itemAt(const QPointF &scenePos) const {
-    if (m_items.empty())
-        return nullptr;
-    for (int i = m_items.size() - 1; i >= 0; i--)
-        if (m_items[i]->contains(scenePos))
-            return m_items[i].get();
-
-    return nullptr;
-}
-
-QRectF CanvasWidget::allItemsBoundingRect() const
-{
-    QRectF bounds;
-
-    for (const auto &item : m_items) {
-        if (!item) {
-            continue;
-        }
-
-        const QRectF itemBounds = item->boundingRect();
-        if (itemBounds.isEmpty()) {
-            continue;
-        }
-
-        bounds = bounds.isNull() ? itemBounds : bounds.united(itemBounds);
-    }
-
-    return bounds;
-}
-
-void CanvasWidget::bringItemToTop(CanvasItem *item)
-{
-    if (!item || m_items.empty()) {
-        return;
-    }
-
-    auto itemIt = std::find_if(
-        m_items.begin(),
-        m_items.end(),
-        [item](const std::unique_ptr<CanvasItem> &candidate) {
-            return candidate.get() == item;
-        }
-        );
-
-    if (itemIt == m_items.end() || std::next(itemIt) == m_items.end()) {
-        return;
-    }
-
-    std::unique_ptr<CanvasItem> movedItem = std::move(*itemIt);
-    m_items.erase(itemIt);
-    m_items.push_back(std::move(movedItem));
-}
-
-CanvasItem *CanvasWidget::itemById(CanvasItemId id) const
-{
-    if (id == InvalidCanvasItemId) {
-        return nullptr;
-    }
-
-    for (const auto &item : m_items) {
-        if (item && item->id() == id) {
-            return item.get();
-        }
-    }
-
-    return nullptr;
-}
-
-CanvasItemId CanvasWidget::allocateItemId()
-{
-    return m_nextItemId++;
-}
-
-void CanvasWidget::assignFreshId(CanvasItem &item)
-{
-    item.setId(allocateItemId());
-}
-
-CanvasItemList CanvasWidget::cloneItems() const
-{
-    CanvasItemList result;
-    result.reserve(m_items.size());
-
-    for (const auto &item : m_items) {
-        if (item) {
-            result.push_back(item->clone());
-        }
-    }
-
-    return result;
-}
-
-bool CanvasWidget::snapshotsEquivalent(const CanvasItemList &left, const CanvasItemList &right) const
-{
-    if (left.size() != right.size()) {
-        return false;
-    }
-
-    for (std::size_t i = 0; i < left.size(); ++i) {
-        const CanvasItem *leftItem = left[i].get();
-        const CanvasItem *rightItem = right[i].get();
-
-        if (!leftItem || !rightItem) {
-            return leftItem == rightItem;
-        }
-
-        if (leftItem->id() != rightItem->id()) {
-            return false;
-        }
-
-        if (!fuzzyRectEquals(leftItem->boundingRect(), rightItem->boundingRect())) {
-            return false;
-        }
-    }
-
-    return true;
-}
-
 void CanvasWidget::executeCommand(std::unique_ptr<CanvasCommand> command)
 {
     if (!command) {
@@ -494,7 +379,7 @@ void CanvasWidget::executeCommand(std::unique_ptr<CanvasCommand> command)
 
 void CanvasWidget::pushSnapshotCommand(CanvasItemList before, CanvasItemList after, bool force)
 {
-    if (!force && snapshotsEquivalent(before, after)) {
+    if (!force && m_document.snapshotsEquivalent(before, after)) {
         return;
     }
 
@@ -503,6 +388,7 @@ void CanvasWidget::pushSnapshotCommand(CanvasItemList before, CanvasItemList aft
         std::move(after)
         ));
     m_redoStack.clear();
+    emit documentChanged();
 }
 
 void CanvasWidget::restoreItemsFromSnapshot(const CanvasItemList &snapshot)
@@ -511,30 +397,8 @@ void CanvasWidget::restoreItemsFromSnapshot(const CanvasItemList &snapshot)
     m_activeHitbox.reset();
     m_itemsBeforeHitboxDrag.clear();
 
-    m_items.clear();
-    m_items.reserve(snapshot.size());
-
-    for (const auto &item : snapshot) {
-        if (item) {
-            m_items.push_back(item->clone());
-        }
-    }
-
-    updateNextItemIdFromItems();
+    m_document.restoreSnapshot(snapshot);
     update();
-}
-
-void CanvasWidget::updateNextItemIdFromItems()
-{
-    CanvasItemId maxId = InvalidCanvasItemId;
-
-    for (const auto &item : m_items) {
-        if (item) {
-            maxId = std::max(maxId, item->id());
-        }
-    }
-
-    m_nextItemId = maxId + 1;
 }
 
 void CanvasWidget::undo()
@@ -551,6 +415,7 @@ void CanvasWidget::undo()
 
     command->undo(*this);
     m_redoStack.push_back(std::move(command));
+    emit documentChanged();
 }
 
 void CanvasWidget::redo()
@@ -567,6 +432,7 @@ void CanvasWidget::redo()
 
     command->redo(*this);
     m_undoStack.push_back(std::move(command));
+    emit documentChanged();
 }
 
 void CanvasWidget::setActiveTextFontFamily(const QString &family)
@@ -654,7 +520,7 @@ Hitbox *CanvasWidget::hitboxAt(const QPointF &scenePos) const
 
     // 2. Then check canvas items that are also HitboxOwner.
     // Reverse order because topmost/latest item should win.
-    for (auto itemIt = m_items.rbegin(); itemIt != m_items.rend(); ++itemIt) {
+    for (auto itemIt = m_document.items().rbegin(); itemIt != m_document.items().rend(); ++itemIt) {
         CanvasItem *item = itemIt->get();
 
         if (!item) {
@@ -704,10 +570,10 @@ void CanvasWidget::handleHitboxPress(Hitbox *hitbox, const QPointF &scenePos)
         .role = hitbox->role,
         .cursorShape = hitbox->cursorShape
     };
-    m_itemsBeforeHitboxDrag = cloneItems();
+    m_itemsBeforeHitboxDrag = m_document.cloneItems();
 
     if (auto *item = dynamic_cast<CanvasItem*>(hitbox->owner)) {
-        bringItemToTop(item);
+        m_document.bringToFront(item);
 
         const bool shouldSelectItem =
             !dynamic_cast<TextBoxItem*>(item) ||
@@ -755,7 +621,7 @@ bool CanvasWidget::handleActiveHitboxRelease(const QPointF &scenePos)
         active.owner->onHitboxReleased(active.role, scenePos);
     }
 
-    pushSnapshotCommand(std::move(m_itemsBeforeHitboxDrag), cloneItems());
+    pushSnapshotCommand(std::move(m_itemsBeforeHitboxDrag), m_document.cloneItems());
     m_itemsBeforeHitboxDrag.clear();
     m_activeHitbox.reset();
 
@@ -773,17 +639,17 @@ bool CanvasWidget::handleMileGridTogglePress(CanvasItem *item, const QPointF &sc
         return false;
     }
 
-    CanvasItemList before = cloneItems();
+    CanvasItemList before = m_document.cloneItems();
 
     m_selection.clear();
     m_activeHitbox.reset();
-    bringItemToTop(mileGrid);
+    m_document.bringToFront(mileGrid);
 
     if (!mileGrid->toggleCellAt(scenePos)) {
         return false;
     }
 
-    pushSnapshotCommand(std::move(before), cloneItems(), true);
+    pushSnapshotCommand(std::move(before), m_document.cloneItems(), true);
     update();
 
     return true;
@@ -842,7 +708,7 @@ void CanvasWidget::drawGrid(QPainter &painter, const QRectF &visibleScene) {
 }
 
 void CanvasWidget::drawItems(QPainter &painter) {
-    for (const auto &item : m_items) {
+    for (const auto &item : m_document.items()) {
         if (auto textBox = dynamic_cast<TextBoxItem*>(item.get())) {
             textBox->setViewScale(m_zoom);
 
@@ -872,6 +738,15 @@ void CanvasWidget::drawCurrentStroke(QPainter &painter) {
     QPen pen(m_penColor, m_penWidth, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin);
     painter.setPen(pen);
     painter.setBrush(Qt::NoBrush);
+
+    if (!m_strokeHasMoved) {
+        const qreal radius = m_penWidth / 2.0;
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(m_penColor);
+        painter.drawEllipse(m_strokeStartScenePos, radius, radius);
+        return;
+    }
+
     painter.drawPath(m_currentPath);
 }
 
@@ -916,6 +791,8 @@ void CanvasWidget::startPenStroke(const QPointF &scenePos) {
     m_drawing = true;
     m_currentPath = QPainterPath();
     m_currentPath.moveTo(scenePos);
+    m_strokeStartScenePos = scenePos;
+    m_strokeHasMoved = false;
 
     update();
 }
@@ -927,7 +804,7 @@ void CanvasWidget::handleSelectPress(const QPointF &scenePos)
         return;
     }
 
-    if (CanvasItem *item = itemAt(scenePos)) {
+    if (CanvasItem *item = m_document.itemAt(scenePos)) {
         if (auto *mileGrid = dynamic_cast<MileGridItem*>(item)) {
             mileGrid->setViewScale(m_zoom);
 
@@ -943,13 +820,13 @@ void CanvasWidget::handleSelectPress(const QPointF &scenePos)
         return;
     }
 
-    if (CanvasItem *item = itemAt(scenePos)) {
+    if (CanvasItem *item = m_document.itemAt(scenePos)) {
         if (auto *textBox = dynamic_cast<TextBoxItem*>(item);
             textBox && !textBox->containsMoveHandle(scenePos)) {
             return;
         }
 
-        bringItemToTop(item);
+        m_document.bringToFront(item);
         m_selection.selectSingleItem(item);
         update();
         return;
@@ -971,20 +848,20 @@ void CanvasWidget::clearActiveHitboxIfOwnedByItem(CanvasItem *item)
 }
 
 void CanvasWidget::eraseAt(const QPointF &scenePos) {
-    if (m_items.empty()) {
+    if (m_document.items().empty()) {
         return;
     }
 
-    for (int i = static_cast<int>(m_items.size()) - 1; i >= 0; --i) {
-        if (m_items[i]->contains(scenePos)) {
-            CanvasItemList before = cloneItems();
+    for (int i = static_cast<int>(m_document.items().size()) - 1; i >= 0; --i) {
+        if (m_document.items()[i]->contains(scenePos)) {
+            CanvasItemList before = m_document.cloneItems();
 
             m_selection.clear();
             m_activeHitbox.reset();
 
-            clearActiveHitboxIfOwnedByItem(m_items[i].get());
-            m_items.erase(m_items.begin() + i);
-            pushSnapshotCommand(std::move(before), cloneItems());
+            clearActiveHitboxIfOwnedByItem(m_document.items()[i].get());
+            m_document.items().erase(m_document.items().begin() + i);
+            pushSnapshotCommand(std::move(before), m_document.cloneItems());
             update();
             return;
         }
@@ -1035,6 +912,15 @@ void CanvasWidget::continuePanning(const QPointF &screenPos) {
 }
 
 void CanvasWidget::continuePenStroke(const QPointF &scenePos) {
+    if (!m_strokeHasMoved) {
+        const qreal threshold = DragThresholdScreenPixels / m_zoom;
+        if (QLineF(m_strokeStartScenePos, scenePos).length() < threshold) {
+            update();
+            return;
+        }
+        m_strokeHasMoved = true;
+    }
+
     m_currentPath.lineTo(scenePos);
     update();
 }
@@ -1087,24 +973,28 @@ void CanvasWidget::finishPanning() {
 void CanvasWidget::finishPenStroke() {
     m_drawing = false;
 
-    CanvasItemList before = cloneItems();
+    CanvasItemList before = m_document.cloneItems();
+
+    QPainterPath completedPath = m_currentPath;
+    if (!m_strokeHasMoved) {
+        completedPath.lineTo(m_strokeStartScenePos + QPointF(DotLineLength, 0.0));
+    }
 
     auto stroke = std::make_unique<StrokeItem>(
-        m_currentPath,
+        completedPath,
         m_penColor,
         m_penWidth
         );
-    assignFreshId(*stroke);
+    m_document.addItem(std::move(stroke));
 
-    m_items.push_back(std::move(stroke));
-
-    pushSnapshotCommand(std::move(before), cloneItems());
+    pushSnapshotCommand(std::move(before), m_document.cloneItems());
     m_currentPath = QPainterPath();
+    m_strokeHasMoved = false;
     update();
 }
 
 void CanvasWidget::finishSelection() {
-    m_selection.finishSelectionRectangle(m_items);
+    m_selection.finishSelectionRectangle(m_document.items());
     update();
 }
 
@@ -1143,9 +1033,18 @@ void CanvasWidget::mouseReleaseEvent(QMouseEvent *event) {
 
 void CanvasWidget::keyPressEvent(QKeyEvent *event)
 {
-    if (event->matches(QKeySequence::Paste) && pasteImageFromClipboard()) {
-        event->accept();
-        return;
+    if (event->matches(QKeySequence::Copy)) {
+        if (copySelection()) {
+            event->accept();
+            return;
+        }
+    }
+
+    if (event->matches(QKeySequence::Paste)) {
+        if (pasteSelection() || pasteImageFromClipboard()) {
+            event->accept();
+            return;
+        }
     }
 
     if (m_pendingTextBoxScenePos.has_value()) {
@@ -1166,6 +1065,12 @@ void CanvasWidget::keyPressEvent(QKeyEvent *event)
                 return;
             }
         }
+    }
+
+    if (event->key() == Qt::Key_Delete) {
+        deleteSelection();
+        event->accept();
+        return;
     }
 
     if (event->key() == Qt::Key_Escape) {
@@ -1259,7 +1164,7 @@ void CanvasWidget::createTextEditorAt(const QPointF &scenePos)
 {
     commitActiveTextEditor();
 
-    if (auto *textBox = dynamic_cast<TextBoxItem*>(itemAt(scenePos))) {
+    if (auto *textBox = dynamic_cast<TextBoxItem*>(m_document.itemAt(scenePos))) {
         clearPendingTextBoxCreation();
         beginEditingTextBox(textBox);
         return;
@@ -1312,7 +1217,7 @@ void CanvasWidget::beginEditingTextBox(TextBoxItem *item)
     m_editingTextItemId = item->id();
     m_activeTextEditorSceneRect = item->rect();
     m_textBeforeEdit = item->html();
-    m_itemsBeforeTextEdit = cloneItems();
+    m_itemsBeforeTextEdit = m_document.cloneItems();
     m_hasTextEditSnapshot = true;
     m_textEditorAppliedZoom = 1.0;
 
@@ -1342,14 +1247,13 @@ void CanvasWidget::beginEditingTextBox(TextBoxItem *item)
 
 void CanvasWidget::beginCreatingTextBox(const QPointF &scenePos)
 {
-    m_itemsBeforeTextEdit = cloneItems();
+    m_itemsBeforeTextEdit = m_document.cloneItems();
     m_hasTextEditSnapshot = true;
 
     auto item = std::make_unique<TextBoxItem>(scenePos, QString());
-    assignFreshId(*item);
 
     TextBoxItem *newTextBox = item.get();
-    m_items.push_back(std::move(item));
+    m_document.addItem(std::move(item));
 
     m_editingNewTextItem = true;
     m_editingTextItemId = newTextBox->id();
@@ -1387,7 +1291,7 @@ void CanvasWidget::commitActiveTextEditor()
         return;
     }
 
-    CanvasItemList before = m_hasTextEditSnapshot ? std::move(m_itemsBeforeTextEdit) : cloneItems();
+    CanvasItemList before = m_hasTextEditSnapshot ? std::move(m_itemsBeforeTextEdit) : m_document.cloneItems();
     m_committingTextEdit = true;
 
     QTextEdit *editor = m_activeTextEditor;
@@ -1399,7 +1303,7 @@ void CanvasWidget::commitActiveTextEditor()
         if (TextBoxItem *item = activeTextBoxItem()) {
             if (plainText.isEmpty()) {
                 clearActiveHitboxIfOwnedByItem(item);
-                std::erase_if(m_items, [item](const std::unique_ptr<CanvasItem> &candidate) {
+                std::erase_if(m_document.items(), [item](const std::unique_ptr<CanvasItem> &candidate) {
                     return candidate.get() == item;
                 });
             } else {
@@ -1413,7 +1317,7 @@ void CanvasWidget::commitActiveTextEditor()
         item->setHtml(html);
     }
 
-    pushSnapshotCommand(std::move(before), cloneItems(), shouldForceSnapshot);
+    pushSnapshotCommand(std::move(before), m_document.cloneItems(), shouldForceSnapshot);
 
     editor->removeEventFilter(this);
     editor->viewport()->removeEventFilter(this);
@@ -1605,5 +1509,5 @@ void CanvasWidget::updateActiveTextEditorGeometry()
 
 TextBoxItem *CanvasWidget::activeTextBoxItem() const
 {
-    return dynamic_cast<TextBoxItem*>(itemById(m_editingTextItemId));
+    return dynamic_cast<TextBoxItem*>(m_document.itemById(m_editingTextItemId));
 }

@@ -22,6 +22,7 @@
 
 #include "appconstants.h"
 #include "canvascommand.h"
+#include "canvasdocument.h"
 #include "canvasitem.h"
 #include "hitbox.h"
 #include "selectioncontroller.h"
@@ -41,6 +42,8 @@ public:
 
     void deleteSelection();
     void duplicateSelection();
+    bool copySelection();
+    bool pasteSelection();
 
     void undo();
     void redo();
@@ -59,6 +62,9 @@ public:
     void setActiveTextItalic(bool italic);
     void setActiveTextUnderline(bool underline);
     void setActiveTextColor(const QColor &color);
+signals:
+    // Emitted after a user-visible document mutation, including undo and redo.
+    void documentChanged();
 protected:
     void paintEvent(QPaintEvent *event) override;
 
@@ -83,14 +89,16 @@ private:
     };
 
     void clearActiveHitboxIfOwnedByItem(CanvasItem *item);
+    void clearCopiedItems();
 
     std::optional<ActiveHitbox> m_activeHitbox;
 
-    std::vector<std::unique_ptr<CanvasItem>> m_items;
-    CanvasItemId m_nextItemId = 1;
+    CanvasDocument m_document;
     std::vector<std::unique_ptr<CanvasCommand>> m_undoStack;
     std::vector<std::unique_ptr<CanvasCommand>> m_redoStack;
     CanvasItemList m_itemsBeforeHitboxDrag;
+    CanvasItemList m_copiedItems;
+    int m_selectionPasteCount = 0;
 
     QPointer<QTextEdit> m_activeTextEditor;
     std::optional<QPointF> m_pendingTextBoxScenePos;
@@ -115,9 +123,10 @@ private:
     QColor m_penColor = AppConstants::DefaultPenColor;
 
     QPainterPath m_currentPath;
+    QPointF m_strokeStartScenePos;
     bool m_drawing = false;
+    bool m_strokeHasMoved = false;
 
-    QRectF allItemsBoundingRect() const;
     QRectF selectedItemsBoundingRect() const;
     void selectItemsInsideRect(const QRectF &rect);
 
@@ -133,16 +142,8 @@ private:
     QRectF defaultImageRect(const QImage &image) const;
     bool insertImage(const QImage &image);
 
-    CanvasItem* itemAt(const QPointF &scenePos) const;
-    CanvasItem* itemById(CanvasItemId id) const;
-    void bringItemToTop(CanvasItem *item);
-    CanvasItemId allocateItemId();
-    void assignFreshId(CanvasItem &item);
-    CanvasItemList cloneItems() const;
-    bool snapshotsEquivalent(const CanvasItemList &left, const CanvasItemList &right) const;
     void executeCommand(std::unique_ptr<CanvasCommand> command);
     void pushSnapshotCommand(CanvasItemList before, CanvasItemList after, bool force = false);
-    void updateNextItemIdFromItems();
 
     Hitbox *hitboxAtForOwner(HitboxOwner *owner, const QPointF &scenePos) const;
     Hitbox *hitboxAt(const QPointF &scenePos) const;

@@ -254,6 +254,21 @@ void SelectionController::selectSingleItem(CanvasItem *item)
     updateHitboxes();
 }
 
+void SelectionController::selectItems(const std::set<CanvasItem*> &items)
+{
+    m_selectedItems.clear();
+    m_drawingSelectionRectangle = false;
+    m_selectionRect = QRectF();
+
+    for (CanvasItem *item : items) {
+        if (item) {
+            m_selectedItems.insert(item);
+        }
+    }
+
+    updateHitboxes();
+}
+
 void SelectionController::deleteSelectedItems(
     std::vector<std::unique_ptr<CanvasItem>> &items
     )

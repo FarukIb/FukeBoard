@@ -1,0 +1,75 @@
+name: Build AppImage
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-appimage:
+    name: Build, test, and package AppImage
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out the source
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            build-essential \
+            cmake \
+            ninja-build \
+            qt6-base-dev \
+            qt6-base-dev-tools
+
+      - name: Configure
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --parallel
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+        env:
+          QT_QPA_PLATFORM: offscreen
+
+      - name: Download AppImage tooling
+        run: |
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/linuxdeploy.AppImage" \
+            https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/linuxdeploy-plugin-qt.AppImage" \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-qt/releases/download/continuous/linuxdeploy-plugin-qt-x86_64.AppImage
+          curl --fail --location --retry 3 \
+            --output "$RUNNER_TEMP/appimagetool.AppImage" \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x "$RUNNER_TEMP"/*.AppImage
+
+      - name: Create AppImage
+        run: |
+          mkdir -p AppDir dist
+          cd "$RUNNER_TEMP"
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 QMAKE=/usr/bin/qmake6 \
+            ./linuxdeploy.AppImage \
+              --appdir "$GITHUB_WORKSPACE/AppDir" \
+              --executable "$GITHUB_WORKSPACE/build/FukeBoard" \
+              --desktop-file "$GITHUB_WORKSPACE/packaging/fukeboard.desktop" \
+              --icon-file "$GITHUB_WORKSPACE/logo.png" \
+              --plugin qt
+          ARCH=x86_64 APPIMAGE_EXTRACT_AND_RUN=1 VERSION="${GITHUB_SHA::7}" \
+            ./appimagetool.AppImage \
+              "$GITHUB_WORKSPACE/AppDir" \
+              "$GITHUB_WORKSPACE/dist/FukeBoard-x86_64.AppImage"
+
+      - name: Upload AppImage
+        uses: actions/upload-artifact@v4
+        with:
+          name: FukeBoard-x86_64-${{ github.sha }}
+          path: dist/FukeBoard-x86_64.AppImage
+          if-no-files-found: error
+          retention-days: 30

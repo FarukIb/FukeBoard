@@ -18,6 +18,9 @@
 using CanvasItemId = std::uint64_t;
 constexpr CanvasItemId InvalidCanvasItemId = 0;
 
+class CanvasItem;
+using CanvasItemList = std::vector<std::unique_ptr<CanvasItem>>;
+
 struct CanvasSerializationContext {
     QMap<QString, QByteArray> assets;
     int nextAssetIndex = 1;
